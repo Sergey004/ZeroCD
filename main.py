@@ -2,58 +2,68 @@
 """
 ZeroCD - DIY USB CD-ROM и LAN адаптер на Raspberry Pi Zero 2 W
 
-Features:
-- USB mass storage emulation with ISO files from microSD
-- USB Ethernet (RNDIS + ECM)
-- 1.3" ST7789 SPI display with 5-way joystick control
-- Optional Wi-Fi hotspot with NAT
+PC Mode: Set ZEROCD_PLATFORM=pc to run with keyboard/curses UI
 """
 
 import signal
 import sys
-import time
-from typing import Optional
+import os
 
-from config import ISO_DIR
+from config import ISO_DIR, USE_PC_EMULATION, TEST_ISO_DIR
 from system.logger import setup_logger, get_logger
-from ui.display import Display
-from ui.menu import Menu
-from input.joystick import Joystick, Direction
-from usb.gadget import GadgetManager
-from usb.iso_manager import ISOManager
-from net.wifi import WiFiManager
+
+if USE_PC_EMULATION:
+    from ui.display_pc import DisplayPC
+    from ui.menu import Menu
+    from input.joystick_pc import JoystickPC
+    from usb.iso_manager import ISOManager
+    from net.wifi import WiFiManager
+    from usb.gadget_pc import GadgetManagerPC
+    ISO_DIR = TEST_ISO_DIR
+else:
+    from ui.display import Display
+    from ui.menu import Menu
+    from input.joystick import Joystick, Direction
+    from usb.iso_manager import ISOManager
+    from net.wifi import WiFiManager
+    from usb.gadget import GadgetManager
 
 
 class ZeroCDApp:
-    """
-    Main ZeroCD application controller.
-    """
-
     def __init__(self):
         self.logger = get_logger("main")
-        self.display: Optional[Display] = None
-        self.joystick: Optional[Joystick] = None
-        self.gadget: Optional[GadgetManager] = None
-        self.iso_manager: Optional[ISOManager] = None
-        self.menu: Optional[Menu] = None
-        self.wifi: Optional[WiFiManager] = None
+        self.display = None
+        self.joystick = None
+        self.gadget = None
+        self.iso_manager = None
+        self.menu = None
+        self.wifi = None
 
-        self.iso_list: list = []
-        self.active_iso: Optional[str] = None
-        self.wifi_enabled: bool = False
-        self.usb_connected: bool = False
-        self.running: bool = False
+        self.iso_list = []
+        self.active_iso = None
+        self.wifi_enabled = False
+        self.usb_connected = False
+        self.running = False
 
     def init(self) -> bool:
-        """Initialize all subsystems."""
-        self.logger.info("Initializing ZeroCD")
+        self.logger.info(f"Initializing ZeroCD (PC mode: {USE_PC_EMULATION})")
         setup_logger()
 
         self.iso_manager = ISOManager(ISO_DIR)
         self.iso_list = self.iso_manager.list_isos()
         self.logger.info(f"Found {len(self.iso_list)} ISO files")
 
-        self.display = Display()
+        if USE_PC_EMULATION:
+            self.display = DisplayPC()
+            self.joystick = JoystickPC(self.on_joystick_event)
+            self.gadget = GadgetManagerPC()
+        else:
+            from config import Direction
+            self.display = Display()
+            self.joystick = Joystick(self.on_joystick_event)
+            self.gadget = GadgetManager()
+            self.gadget.init()
+
         self.display.init()
         self.display.show_splash()
 
@@ -61,18 +71,12 @@ class ZeroCDApp:
         if self.iso_list:
             self.active_iso = self.iso_list[0]
 
-        self.gadget = GadgetManager()
-        self.gadget.init()
-
         self.wifi = WiFiManager()
-
-        self.joystick = Joystick(self.on_joystick_event)
 
         self.logger.info("ZeroCD initialization complete")
         return True
 
     def on_iso_selected(self, iso_name: str):
-        """Handle ISO selection from menu."""
         self.logger.info(f"User selected ISO: {iso_name}")
         iso_path = self.iso_manager.get_iso_path(iso_name)
         if iso_path and self.gadget:
@@ -80,25 +84,23 @@ class ZeroCDApp:
             self.active_iso = iso_name
             self.update_display()
 
-    def on_joystick_event(self, direction: Direction):
-        """Handle joystick input events."""
-        self.logger.debug(f"Joystick: {direction.value}")
+    def on_joystick_event(self, direction):
+        self.logger.debug(f"Joystick: {direction.value if hasattr(direction, 'value') else direction}")
 
-        if direction == Direction.UP:
+        if str(direction) in ('Direction.UP', 'up', 'UP'):
             self.menu.prev()
-        elif direction == Direction.DOWN:
+        elif str(direction) in ('Direction.DOWN', 'down', 'DOWN'):
             self.menu.next()
-        elif direction == Direction.PRESS:
+        elif str(direction) in ('Direction.PRESS', 'press', 'PRESS', 'enter', 'space'):
             self.menu.select()
-        elif direction == Direction.RIGHT:
+        elif str(direction) in ('Direction.RIGHT', 'right', 'RIGHT'):
             self.toggle_wifi()
-        elif direction == Direction.LEFT:
+        elif str(direction) in ('Direction.LEFT', 'left', 'LEFT'):
             pass
 
         self.update_display()
 
     def toggle_wifi(self):
-        """Toggle Wi-Fi on/off."""
         if self.wifi_enabled:
             self.wifi.disable()
             self.wifi_enabled = False
@@ -109,7 +111,6 @@ class ZeroCDApp:
                 self.logger.info("Wi-Fi enabled")
 
     def update_display(self):
-        """Update display with current state."""
         if self.display:
             self.display.draw_menu(
                 items=self.menu.get_visible_items() if self.menu else [],
@@ -118,15 +119,18 @@ class ZeroCDApp:
                 wifi_on=self.wifi_enabled,
                 usb_bound=self.usb_connected
             )
-            self.display.update()
+            if hasattr(self.display, 'update'):
+                self.display.update()
 
     def run(self):
-        """Main application loop."""
         self.running = True
         self.logger.info("Starting ZeroCD main loop")
 
-        self.gadget.bind()
-        self.usb_connected = True
+        if USE_PC_EMULATION:
+            print("\n[ZeroCD] Running in PC mode. Use arrow keys to navigate.\n")
+        else:
+            self.gadget.bind()
+            self.usb_connected = True
 
         if self.joystick:
             self.joystick.start_polling(self.on_joystick_event)
@@ -134,7 +138,13 @@ class ZeroCDApp:
         self.update_display()
 
         try:
+            import time
             while self.running:
+                if USE_PC_EMULATION:
+                    import keyboard
+                    if keyboard.is_pressed('q'):
+                        self.logger.info("Quit key pressed")
+                        break
                 time.sleep(0.1)
         except KeyboardInterrupt:
             self.logger.info("Keyboard interrupt received")
@@ -142,7 +152,6 @@ class ZeroCDApp:
             self.shutdown()
 
     def shutdown(self):
-        """Graceful shutdown."""
         self.logger.info("Shutting down ZeroCD")
         self.running = False
 
@@ -162,7 +171,6 @@ class ZeroCDApp:
 
 
 def main():
-    """Entry point."""
     app = ZeroCDApp()
 
     def signal_handler(signum, frame):

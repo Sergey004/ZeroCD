@@ -100,7 +100,7 @@ class Joystick:
 
     def _poll_loop(self):
         """Background polling loop."""
-        last_directions = {d: 0 for d in Direction}
+        last_directions: Dict[Direction, float] = {d: 0 for d in Direction}
         debounce_time = 0.1
 
         while self.running:

@@ -4,7 +4,7 @@ ZeroCD Logger
 import logging
 import os
 
-LOG_FILE = "/var/log/zerocd.log"
+LOG_FILE = "zerocd.log"
 
 
 def setup_logger(name: str = "zerocd") -> logging.Logger:
@@ -16,7 +16,8 @@ def setup_logger(name: str = "zerocd") -> logging.Logger:
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
-    os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+    log_path = os.path.abspath(LOG_FILE)
+    os.makedirs(os.path.dirname(log_path), exist_ok=True) if os.path.dirname(log_path) else None
     file_handler = logging.FileHandler(LOG_FILE)
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(formatter)

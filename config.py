@@ -23,7 +23,8 @@ JOYSTICK_PINS = {
 DISPLAY_WIDTH = 240
 DISPLAY_HEIGHT = 240
 
-ISO_DIR = "/images"
+ISO_DIR = "/mnt/iso_storage"
+TEST_ISO_DIR = "/tmp/iso_storage"
 
 GADGET_DIR = "/sys/kernel/config/usb_gadget/zerocd"
 GADGET_UDC = None
@@ -33,6 +34,9 @@ USB_ETHERNET_INTERFACE = "usb0"
 USB_ETHERNET_IP = "192.168.7.1"
 HOST_IP = "192.168.7.2"
 
-LOG_FILE = "/var/log/zerocd.log"
+LOG_FILE = "zerocd.log"
 JOYSTICK_POLL_RATE = 50
 MENU_ITEMS_PER_PAGE = 5
+
+PLATFORM = os.environ.get("ZEROCD_PLATFORM", "pi")
+USE_PC_EMULATION = PLATFORM == "pc"

@@ -23,21 +23,21 @@ class Menu:
         self.on_select = on_select
         self.scroll_offset = 0
 
-    def next(self) -> str:
+    def next(self) -> Optional[str]:
         """Move selection to next item."""
         if self.items:
             self.selected_index = (self.selected_index + 1) % len(self.items)
             self._update_scroll()
         return self.get_current()
 
-    def prev(self) -> str:
+    def prev(self) -> Optional[str]:
         """Move selection to previous item."""
         if self.items:
             self.selected_index = (self.selected_index - 1) % len(self.items)
             self._update_scroll()
         return self.get_current()
 
-    def select(self) -> str:
+    def select(self) -> Optional[str]:
         """Confirm selection."""
         current = self.get_current()
         if current and self.on_select:
