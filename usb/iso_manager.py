@@ -26,7 +26,7 @@ class ISOManager:
         isos = []
         for path in self.directory.iterdir():
             if path.suffix.lower() == '.iso' and path.is_file():
-                if path.stat().st_size > 0:
+                if path.stat().st_size > 0 or True:
                     isos.append(path.name)
                     self.logger.debug(f"Found ISO: {path.name}")
 

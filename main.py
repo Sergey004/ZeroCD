@@ -2,7 +2,7 @@
 """
 ZeroCD - DIY USB CD-ROM и LAN адаптер на Raspberry Pi Zero 2 W
 
-PC Mode: Set ZEROCD_PLATFORM=pc to run with keyboard/curses UI
+PC Mode: Set ZEROCD_PLATFORM=pc to run with curses TUI
 """
 
 import signal
@@ -15,7 +15,7 @@ from system.logger import setup_logger, get_logger
 if USE_PC_EMULATION:
     from ui.display_pc import DisplayPC
     from ui.menu import Menu
-    from input.joystick_pc import JoystickPC
+    from input.joystick_pc import JoystickPC, Direction
     from usb.iso_manager import ISOManager
     from net.wifi import WiFiManager
     from usb.gadget_pc import GadgetManagerPC
@@ -58,13 +58,15 @@ class ZeroCDApp:
             self.joystick = JoystickPC(self.on_joystick_event)
             self.gadget = GadgetManagerPC()
         else:
-            from config import Direction
             self.display = Display()
             self.joystick = Joystick(self.on_joystick_event)
             self.gadget = GadgetManager()
             self.gadget.init()
 
-        self.display.init()
+        if not self.display.init():
+            self.logger.error("Failed to initialize display")
+            return False
+
         self.display.show_splash()
 
         self.menu = Menu(self.iso_list, self.on_iso_selected)
@@ -84,18 +86,20 @@ class ZeroCDApp:
             self.active_iso = iso_name
             self.update_display()
 
-    def on_joystick_event(self, direction):
-        self.logger.debug(f"Joystick: {direction.value if hasattr(direction, 'value') else direction}")
+    def on_joystick_event(self, direction: Direction):
+        if direction == Direction.QUIT:
+            self.running = False
+            return
 
-        if str(direction) in ('Direction.UP', 'up', 'UP'):
+        if direction == Direction.UP:
             self.menu.prev()
-        elif str(direction) in ('Direction.DOWN', 'down', 'DOWN'):
+        elif direction == Direction.DOWN:
             self.menu.next()
-        elif str(direction) in ('Direction.PRESS', 'press', 'PRESS', 'enter', 'space'):
+        elif direction == Direction.PRESS:
             self.menu.select()
-        elif str(direction) in ('Direction.RIGHT', 'right', 'RIGHT'):
+        elif direction == Direction.RIGHT:
             self.toggle_wifi()
-        elif str(direction) in ('Direction.LEFT', 'left', 'LEFT'):
+        elif direction == Direction.LEFT:
             pass
 
         self.update_display()
@@ -127,29 +131,32 @@ class ZeroCDApp:
         self.logger.info("Starting ZeroCD main loop")
 
         if USE_PC_EMULATION:
-            print("\n[ZeroCD] Running in PC mode. Use arrow keys to navigate.\n")
+            if self.display and hasattr(self.display, 'stdscr') and self.display.stdscr:
+                self.joystick.start_polling(self.on_joystick_event, self.display.stdscr)
+            else:
+                self.joystick.start_polling(self.on_joystick_event)
         else:
             self.gadget.bind()
             self.usb_connected = True
 
-        if self.joystick:
-            self.joystick.start_polling(self.on_joystick_event)
-
         self.update_display()
 
-        try:
-            import time
-            while self.running:
-                if USE_PC_EMULATION:
-                    import keyboard
-                    if keyboard.is_pressed('q'):
-                        self.logger.info("Quit key pressed")
-                        break
-                time.sleep(0.1)
-        except KeyboardInterrupt:
-            self.logger.info("Keyboard interrupt received")
-        finally:
-            self.shutdown()
+        if USE_PC_EMULATION:
+            self._run_pc_loop()
+        else:
+            self._run_pi_loop()
+
+    def _run_pc_loop(self):
+        """PC mode: wait for quit."""
+        import time
+        while self.running:
+            time.sleep(0.05)
+
+    def _run_pi_loop(self):
+        """Pi mode: just wait."""
+        import time
+        while self.running:
+            time.sleep(0.1)
 
     def shutdown(self):
         self.logger.info("Shutting down ZeroCD")
@@ -171,21 +178,37 @@ class ZeroCDApp:
 
 
 def main():
-    app = ZeroCDApp()
-
     def signal_handler(signum, frame):
-        app.logger.info(f"Received signal {signum}")
-        app.shutdown()
+        app = globals().get('app')
+        if app:
+            app.logger.info(f"Received signal {signum}")
+            app.shutdown()
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
 
-    if app.init():
-        app.run()
+    if USE_PC_EMULATION and sys.stdout.isatty():
+        import curses
+
+        def curses_main(stdscr):
+            global app
+            app = ZeroCDApp()
+            if app.init():
+                app.run()
+            else:
+                app.logger.error("Failed to initialize ZeroCD")
+                sys.exit(1)
+
+        curses.wrapper(curses_main)
     else:
-        app.logger.error("Failed to initialize ZeroCD")
-        sys.exit(1)
+        global app
+        app = ZeroCDApp()
+        if app.init():
+            app.run()
+        else:
+            app.logger.error("Failed to initialize ZeroCD")
+            sys.exit(1)
 
 
 if __name__ == "__main__":

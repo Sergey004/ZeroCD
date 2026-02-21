@@ -1,12 +1,9 @@
 """
-PC Joystick emulator using keyboard
+PC Joystick emulator using curses
 """
-import sys
-import select
-import tty
-import termios
+import curses
 from enum import Enum
-from typing import Optional, Callable, Dict
+from typing import Optional, Callable
 
 
 class Direction(Enum):
@@ -15,74 +12,56 @@ class Direction(Enum):
     LEFT = "left"
     RIGHT = "right"
     PRESS = "press"
+    QUIT = "quit"
     NONE = "none"
 
 
 class JoystickPC:
     """
-    PC-based joystick emulator using keyboard.
+    PC-based joystick emulator using curses keyboard input.
 
     Controls:
-    - Arrow UP / W: Up
-    - Arrow DOWN / S: Down
-    - Arrow LEFT / A: Left
-    - Arrow RIGHT / D: Right
+    - Arrow UP / W / K: Up
+    - Arrow DOWN / S / J: Down
+    - Arrow LEFT / A / H: Left
+    - Arrow RIGHT / D / L: Right
     - Enter / Space: Press
-
-    Usage:
-        joystick = JoystickPC()
-        joystick.start_polling(callback)
-        # Or: direction = joystick.get_keypress()
+    - Q: Quit
     """
-
-    KEY_MAP: Dict[str, Direction] = {
-        'w': Direction.UP,
-        'k': Direction.UP,
-        '\x1b[A': Direction.UP,
-        's': Direction.DOWN,
-        'j': Direction.DOWN,
-        '\x1b[B': Direction.DOWN,
-        'a': Direction.LEFT,
-        'h': Direction.LEFT,
-        '\x1b[D': Direction.LEFT,
-        'd': Direction.RIGHT,
-        'l': Direction.RIGHT,
-        '\x1b[C': Direction.RIGHT,
-        '\n': Direction.PRESS,
-        ' ': Direction.PRESS,
-        '\r': Direction.PRESS,
-    }
 
     def __init__(self, callback: Optional[Callable[[Direction], None]] = None):
         self.callback = callback
         self.running = False
         self._thread = None
+        self.stdscr = None
 
-    def get_keypress(self, timeout: float = 0.1) -> Direction:
-        """
-        Get single keypress with timeout.
-
-        Returns:
-            Direction or NONE if timeout
-        """
-        old_settings = termios.tcgetattr(sys.stdin)
-        try:
-            tty.setcbreak(sys.stdin.fileno())
-
-            dr, dw, de = select.select([sys.stdin], [], [], [] if timeout is None else timeout)
-            if dr:
-                key = sys.stdin.read(1)
-                if key == '\x1b':
-                    seq = key + sys.stdin.read(2)
-                    return self.KEY_MAP.get(seq, Direction.NONE)
-                return self.KEY_MAP.get(key, Direction.NONE)
-        finally:
-            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+    def _map_key(self, key: int) -> Direction:
+        """Map curses key to Direction."""
+        if key in (ord('w'), ord('W'), ord('k'), ord('K'), curses.KEY_UP):
+            return Direction.UP
+        elif key in (ord('s'), ord('S'), ord('j'), ord('J'), curses.KEY_DOWN):
+            return Direction.DOWN
+        elif key in (ord('a'), ord('A'), ord('h'), ord('H'), curses.KEY_LEFT):
+            return Direction.LEFT
+        elif key in (ord('d'), ord('D'), ord('l'), ord('L'), curses.KEY_RIGHT):
+            return Direction.RIGHT
+        elif key in (ord('\n'), ord(' '), ord('\r')):
+            return Direction.PRESS
+        elif key in (ord('q'), ord('Q'), 27):
+            return Direction.QUIT
         return Direction.NONE
 
-    def start_polling(self, callback: Callable[[Direction], None]):
-        """Start polling keyboard in background."""
+    def get_key(self) -> Direction:
+        """Get single key (blocking)."""
+        if not self.stdscr:
+            return Direction.NONE
+        key = self.stdscr.getch()
+        return self._map_key(key)
+
+    def start_polling(self, callback: Callable[[Direction], None], stdscr=None):
+        """Start polling with callback."""
         self.callback = callback
+        self.stdscr = stdscr
         self.running = True
         import threading
         self._thread = threading.Thread(target=self._poll_loop, daemon=True)
@@ -92,35 +71,27 @@ class JoystickPC:
         """Background polling loop."""
         import time
         debounce_time = 0.15
-        last_direction_time = 0
+        last_time = 0
 
-        old_settings = termios.tcgetattr(sys.stdin)
-        try:
-            tty.setcbreak(sys.stdin.fileno())
-            while self.running:
-                direction = self.get_keypress(timeout=0.05)
-                if direction != Direction.NONE:
-                    now = time.time()
-                    if now - last_direction_time > debounce_time:
-                        if self.callback:
-                            self.callback(direction)
-                        last_direction_time = now
-                time.sleep(0.01)
-        finally:
-            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+        while self.running:
+            if self.stdscr:
+                try:
+                    self.stdscr.nodelay(True)
+                    key = self.stdscr.getch()
+                    if key != -1:
+                        direction = self._map_key(key)
+                        if direction != Direction.NONE:
+                            now = time.time()
+                            if now - last_time > debounce_time:
+                                if self.callback:
+                                    self.callback(direction)
+                                last_time = now
+                except:
+                    pass
+            time.sleep(0.02)
 
     def stop(self):
         """Stop polling."""
         self.running = False
         if self._thread:
             self._thread.join(timeout=1)
-
-    def read_event(self):
-        """Read single event (blocking)."""
-        return self.get_keypress(timeout=-1)
-
-
-def is_key_pressed() -> bool:
-    """Check if any key is currently pressed."""
-    result = select.select([sys.stdin], [], [], 0)
-    return len(result[0]) > 0
