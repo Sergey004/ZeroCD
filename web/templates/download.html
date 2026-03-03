@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Скачать ISO - ZeroCD</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        
+        header { background: linear-gradient(135deg, #16213e 0%, #1a1a2e 100%); padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #0f3460; }
+        h1 { color: #00d9ff; font-size: 1.5rem; }
+        
+        nav { display: flex; gap: 10px; margin-bottom: 20px; }
+        nav a { color: #888; text-decoration: none; padding: 8px 16px; border-radius: 6px; }
+        nav a:hover { color: #00d9ff; background: #00d9ff11; }
+        nav a.active { color: #00d9ff; background: #00d9ff22; }
+        
+        .card { background: #16213e; border-radius: 12px; padding: 25px; border: 1px solid #0f3460; margin-bottom: 20px; }
+        
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 8px; color: #888; }
+        input[type="text"], input[type="url"] { width: 100%; padding: 12px; background: #0f3460; border: 1px solid #1a4a7a; border-radius: 8px; color: #fff; font-size: 1rem; }
+        input:focus { outline: none; border-color: #00d9ff; }
+        
+        .btn { padding: 12px 24px; border: none; border-radius: 8px; font-size: 1rem; cursor: pointer; }
+        .btn-primary { background: #00d9ff; color: #1a1a2e; font-weight: 600; width: 100%; }
+        .btn:hover { opacity: 0.9; }
+        
+        .popular { margin-top: 20px; }
+        .popular-title { color: #888; margin-bottom: 10px; font-size: 0.9rem; }
+        .popular-list { display: flex; flex-direction: column; gap: 8px; }
+        .popular-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #0f3460; border-radius: 8px; }
+        .popular-name { font-weight: 500; }
+        .popular-size { color: #888; font-size: 0.85rem; }
+        .popular-download { padding: 6px 12px; background: #00d9ff22; color: #00d9ff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
+        
+        .progress { margin-top: 20px; display: none; }
+        .progress-bar { height: 8px; background: #0f3460; border-radius: 4px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #00d9ff, #00ff88); width: 0%; transition: width 0.3s; }
+        .progress-info { display: flex; justify-content: space-between; margin-top: 10px; font-size: 0.85rem; color: #888; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header><h1>Скачать ISO</h1></header>
+        
+        <nav>
+            <a href="/">ISO</a>
+            <a href="/upload">Загрузить</a>
+            <a href="/download" class="active">Скачать</a>
+            <a href="/settings">Настройки</a>
+        </nav>
+        
+        <div class="card">
+            <div class="form-group">
+                <label>URL образа</label>
+                <input type="url" id="urlInput" placeholder="https://example.com/image.iso">
+            </div>
+            <div class="form-group">
+                <label>Имя файла (опционально)</label>
+                <input type="text" id="nameInput" placeholder="my-distro.iso">
+            </div>
+            <button class="btn btn-primary" onclick="startDownload()">Скачать</button>
+            
+            <div class="progress" id="progress">
+                <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+                <div class="progress-info">
+                    <span id="progressPercent">0%</span>
+                    <span id="progressSpeed">0 KB/s</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="popular">
+            <div class="popular-title">Популярные образы:</div>
+            <div class="popular-list">
+                {% for iso in popular_isos %}
+                <div class="popular-item">
+                    <div>
+                        <div class="popular-name">{{ iso.name }}</div>
+                        <div class="popular-size">{{ iso.size }}</div>
+                    </div>
+                    <button class="popular-download" onclick="downloadPopular('{{ iso.url }}', '{{ iso.name }}.iso')">Скачать</button>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let downloadTaskId = null;
+        let pollInterval = null;
+        
+        function startDownload(url = null, name = null) {
+            url = url || document.getElementById('urlInput').value;
+            name = name || document.getElementById('nameInput').value || 'download.iso';
+            
+            if (!url) return alert('Введите URL');
+            
+            fetch('/api/download', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({url, name})
+            }).then(r => r.json()).then(data => {
+                if (data.task_id) {
+                    downloadTaskId = data.task_id;
+                    document.getElementById('progress').style.display = 'block';
+                    pollInterval = setInterval(checkStatus, 1000);
+                } else {
+                    alert(data.error || 'Ошибка');
+                }
+            });
+        }
+        
+        function downloadPopular(url, name) {
+            document.getElementById('urlInput').value = url;
+            document.getElementById('nameInput').value = name;
+            startDownload(url, name);
+        }
+        
+        function checkStatus() {
+            fetch('/api/download/status').then(r => r.json()).then(tasks => {
+                const task = tasks[downloadTaskId];
+                if (!task) return;
+                
+                const percent = task.percent || 0;
+                document.getElementById('progressFill').style.width = percent + '%';
+                document.getElementById('progressPercent').textContent = percent + '%';
+                document.getElementById('progressSpeed').textContent = formatSize(task.speed || 0) + '/s';
+                
+                if (task.status === 'complete') {
+                    clearInterval(pollInterval);
+                    alert('Загрузка завершена!');
+                    window.location.href = '/';
+                } else if (task.status === 'error') {
+                    clearInterval(pollInterval);
+                    alert('Ошибка: ' + (task.error || 'unknown'));
+                }
+            });
+        }
+        
+        function formatSize(bytes) {
+            for (let unit of ['B', 'KB', 'MB', 'GB']) {
+                if (bytes < 1024) return bytes.toFixed(1) + ' ' + unit;
+                bytes /= 1024;
+            }
+            return bytes.toFixed(1) + ' TB';
+        }
+    </script>
+</body>
+</html>

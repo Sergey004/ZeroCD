@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Загрузить ISO - ZeroCD</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        
+        header { background: linear-gradient(135deg, #16213e 0%, #1a1a2e 100%); padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #0f3460; }
+        h1 { color: #00d9ff; font-size: 1.5rem; }
+        
+        nav { display: flex; gap: 10px; margin-bottom: 20px; }
+        nav a { color: #888; text-decoration: none; padding: 8px 16px; border-radius: 6px; }
+        nav a:hover { color: #00d9ff; background: #00d9ff11; }
+        nav a.active { color: #00d9ff; background: #00d9ff22; }
+        
+        .card { background: #16213e; border-radius: 12px; padding: 30px; border: 1px solid #0f3460; }
+        
+        .drop-zone { border: 2px dashed #0f3460; border-radius: 12px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.3s; }
+        .drop-zone:hover, .drop-zone.dragover { border-color: #00d9ff; background: #00d9ff11; }
+        .drop-icon { font-size: 3rem; margin-bottom: 15px; }
+        .drop-text { color: #888; margin-bottom: 10px; }
+        
+        input[type="file"] { display: none; }
+        
+        .btn { padding: 12px 24px; border: none; border-radius: 8px; font-size: 1rem; cursor: pointer; }
+        .btn-primary { background: #00d9ff; color: #1a1a2e; font-weight: 600; margin-top: 15px; }
+        
+        .progress-container { margin-top: 20px; display: none; }
+        .progress-bar { height: 8px; background: #0f3460; border-radius: 4px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #00d9ff, #00ff88); width: 0%; transition: width 0.3s; }
+        .progress-text { margin-top: 10px; color: #888; font-size: 0.9rem; }
+        
+        .result { margin-top: 20px; padding: 15px; border-radius: 8px; display: none; }
+        .result.success { background: #00ff8822; border: 1px solid #00ff8844; color: #00ff88; }
+        .result.error { background: #ff6b6b22; border: 1px solid #ff6b6b44; color: #ff6b6b; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Загрузить ISO</h1>
+        </header>
+        
+        <nav>
+            <a href="/">ISO</a>
+            <a href="/upload" class="active">Загрузить</a>
+            <a href="/download">Скачать</a>
+            <a href="/settings">Настройки</a>
+        </nav>
+        
+        <div class="card">
+            <div class="drop-zone" id="dropZone">
+                <div class="drop-icon">📁</div>
+                <div class="drop-text">Перетащите файл ISO сюда</div>
+                <div class="drop-text">или</div>
+                <button class="btn" onclick="document.getElementById('fileInput').click()">Выбрать файл</button>
+            </div>
+            
+            <input type="file" id="fileInput" accept=".iso">
+            
+            <div class="progress-container" id="progress">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <div class="progress-text" id="progressText">Загрузка...</div>
+            </div>
+            
+            <div class="result" id="result"></div>
+        </div>
+    </div>
+    
+    <script>
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        
+        dropZone.addEventListener('dragover', e => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+        
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+        
+        dropZone.addEventListener('drop', e => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file) uploadFile(file);
+        });
+        
+        fileInput.addEventListener('change', e => {
+            const file = e.target.files[0];
+            if (file) uploadFile(file);
+        });
+        
+        function uploadFile(file) {
+            if (!file.name.endsWith('.iso')) {
+                showResult('Только файлы .iso!', 'error');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            document.getElementById('progress').style.display = 'block';
+            document.getElementById('progressFill').style.width = '0%';
+            document.getElementById('result').style.display = 'none';
+            
+            const xhr = new XMLHttpRequest();
+            
+            xhr.upload.addEventListener('progress', e => {
+                if (e.lengthComputable) {
+                    const percent = (e.loaded / e.total * 100).toFixed(0);
+                    document.getElementById('progressFill').style.width = percent + '%';
+                    document.getElementById('progressText').textContent = 
+                        `Загрузка: ${percent}% (${formatSize(e.loaded)} / ${formatSize(e.total)})`;
+                }
+            });
+            
+            xhr.addEventListener('load', () => {
+                document.getElementById('progress').style.display = 'none';
+                if (xhr.status === 200) {
+                    showResult('Файл загружен! Перенаправление...', 'success');
+                    setTimeout(() => window.location.href = '/', 1500);
+                } else {
+                    try {
+                        const data = JSON.parse(xhr.responseText);
+                        showResult(data.error || 'Ошибка загрузки', 'error');
+                    } catch {
+                        showResult('Ошибка загрузки', 'error');
+                    }
+                }
+            });
+            
+            xhr.addEventListener('error', () => {
+                document.getElementById('progress').style.display = 'none';
+                showResult('Ошибка соединения', 'error');
+            });
+            
+            xhr.open('POST', '/upload');
+            xhr.send(formData);
+        }
+        
+        function showResult(msg, type) {
+            const el = document.getElementById('result');
+            el.textContent = msg;
+            el.className = 'result ' + type;
+            el.style.display = 'block';
+        }
+        
+        function formatSize(bytes) {
+            for (let unit of ['B', 'KB', 'MB', 'GB']) {
+                if (bytes < 1024) return bytes.toFixed(1) + ' ' + unit;
+                bytes /= 1024;
+            }
+            return bytes.toFixed(1) + ' TB';
+        }
+    </script>
+</body>
+</html>

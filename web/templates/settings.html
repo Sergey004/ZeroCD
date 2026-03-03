@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Настройки WiFi - ZeroCD</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        
+        header { background: linear-gradient(135deg, #16213e 0%, #1a1a2e 100%); padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #0f3460; }
+        h1 { color: #00d9ff; font-size: 1.5rem; }
+        
+        nav { display: flex; gap: 10px; margin-bottom: 20px; }
+        nav a { color: #888; text-decoration: none; padding: 8px 16px; border-radius: 6px; }
+        nav a:hover { color: #00d9ff; background: #00d9ff11; }
+        nav a.active { color: #00d9ff; background: #00d9ff22; }
+        
+        .card { background: #16213e; border-radius: 12px; padding: 20px; border: 1px solid #0f3460; margin-bottom: 20px; }
+        
+        .status-row { display: flex; justify-content: space-between; align-items: center; padding: 15px 0; border-bottom: 1px solid #0f3460; }
+        .status-row:last-child { border-bottom: none; }
+        .status-label { color: #888; }
+        .status-value { font-weight: 500; }
+        .status-value.on { color: #00ff88; }
+        .status-value.off { color: #ff6b6b; }
+        
+        .btn { padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem; }
+        .btn-primary { background: #00d9ff; color: #1a1a2e; font-weight: 600; }
+        .btn-danger { background: #ff6b6b22; color: #ff6b6b; }
+        
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 8px; color: #888; font-size: 0.9rem; }
+        input { width: 100%; padding: 12px; background: #0f3460; border: 1px solid #1a4a7a; border-radius: 8px; color: #fff; font-size: 1rem; }
+        
+        .section-title { color: #00d9ff; margin-bottom: 15px; font-size: 1.1rem; }
+        
+        .qr-code { background: #fff; padding: 20px; border-radius: 8px; text-align: center; margin: 15px 0; }
+        .qr-code canvas { max-width: 100%; }
+        
+        .scan-btn { width: 100%; margin-bottom: 15px; }
+        
+        .network-list { margin-top: 15px; }
+        .network-item { padding: 12px; background: #0f3460; border-radius: 8px; margin-bottom: 8px; cursor: pointer; }
+        .network-item:hover { background: #1a4a7a; }
+        .network-name { font-weight: 500; }
+        .network-saved { color: #00ff88; font-size: 0.8rem; margin-top: 4px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header><h1>Настройки WiFi</h1></header>
+        
+        <nav>
+            <a href="/">ISO</a>
+            <a href="/upload">Загрузить</a>
+            <a href="/download">Скачать</a>
+            <a href="/settings" class="active">Настройки</a>
+        </nav>
+        
+        <div class="card">
+            <div class="section-title">Текущий статус</div>
+            
+            <div class="status-row">
+                <span class="status-label">Состояние</span>
+                <span class="status-value {% if wifi_connected %}on{% else %}off{% endif %}">
+                    {{ 'Подключено' if wifi_connected else 'Отключено' }}
+                </span>
+            </div>
+            
+            {% if wifi_connected %}
+            <div class="status-row">
+                <span class="status-label">Сеть (SSID)</span>
+                <span class="status-value">{{ wifi_ssid }}</span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">IP адрес</span>
+                <span class="status-value">{{ wifi_ip }}</span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">Действия</span>
+                <button class="btn btn-danger" onclick="disconnectWifi()">Отключиться</button>
+            </div>
+            {% else %}
+            <div class="status-row">
+                <span class="status-label">Действия</span>
+                <button class="btn btn-primary" onclick="document.getElementById('connectForm').style.display='block'">Подключиться</button>
+            </div>
+            {% endif %}
+        </div>
+        
+        <div class="card" id="connectForm" {% if wifi_connected %}style="display:none"{% endif %}>
+            <div class="section-title">Подключиться к сети</div>
+            
+            <div class="form-group">
+                <label>SSID (название сети)</label>
+                <input type="text" id="ssidInput" placeholder="MyWiFi">
+            </div>
+            <div class="form-group">
+                <label>Пароль</label>
+                <input type="password" id="passwordInput" placeholder="Пароль">
+            </div>
+            <button class="btn btn-primary" style="width:100%" onclick="connectWifi()">Подключиться</button>
+            
+            <button class="btn scan-btn" style="margin-top:10px; background:#0f3460; color:#888" onclick="scanNetworks()">
+                🔍 Сканировать сети
+            </button>
+            
+            <div class="network-list" id="networkList"></div>
+        </div>
+        
+        <div class="card">
+            <div class="section-title">Точка доступа (Captive Portal)</div>
+            
+            <div class="status-row">
+                <span class="status-label">SSID</span>
+                <span class="status-value">{{ ap_ssid }}</span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">Пароль</span>
+                <span class="status-value">{{ ap_password }}</span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">IP адрес</span>
+                <span class="status-value">{{ ap_ip }}</span>
+            </div>
+            
+            <div style="margin-top: 15px;">
+                <div class="qr-code" id="qrCode"></div>
+                <p style="color:#888;font-size:0.85rem;margin-top:10px">
+                    Отсканируйте QR код для подключения к точке доступа
+                </p>
+            </div>
+        </div>
+        
+        {% if wifi_ssid %}
+        <div class="card">
+            <div class="section-title">Управление сетью</div>
+            <button class="btn btn-danger" style="width:100%" onclick="forgetNetwork()">
+                Забыть сеть {{ wifi_ssid }}
+            </button>
+        </div>
+        {% endif %}
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+    <script>
+        QRCode.toCanvas(document.createElement('canvas'), 'WIFI:T:WPA;S:{{ ap_ssid }};P:{{ ap_password }};;', 
+            {width: 200}, (err, canvas) => {
+                if (!err) document.getElementById('qrCode').appendChild(canvas);
+            });
+        
+        function connectWifi() {
+            const ssid = document.getElementById('ssidInput').value;
+            const password = document.getElementById('passwordInput').value;
+            
+            fetch('/api/wifi/connect', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ssid, password})
+            }).then(r => r.json()).then(data => {
+                if (data.success) {
+                    alert('Подключено к ' + ssid);
+                    location.reload();
+                } else {
+                    alert(data.error || 'Ошибка подключения');
+                }
+            });
+        }
+        
+        function disconnectWifi() {
+            fetch('/api/wifi/disconnect', {method: 'POST'}).then(r => r.json()).then(() => location.reload());
+        }
+        
+        function forgetNetwork() {
+            if (!confirm('Забыть сохранённую сеть?')) return;
+            fetch('/api/wifi/forget', {method: 'POST'}).then(r => r.json()).then(() => location.reload());
+        }
+        
+        function scanNetworks() {
+            fetch('/api/wifi/scan').then(r => r.json()).then(data => {
+                const list = document.getElementById('networkList');
+                list.innerHTML = data.networks.map(n => 
+                    `<div class="network-item" onclick="selectNetwork('${n}')">
+                        <div class="network-name">📶 ${n}</div>
+                    </div>`
+                ).join('');
+            });
+        }
+        
+        function selectNetwork(ssid) {
+            document.getElementById('ssidInput').value = ssid;
+            document.getElementById('passwordInput').focus();
+        }
+    </script>
+</body>
+</html>
