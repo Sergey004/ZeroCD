@@ -1,93 +1,93 @@
 # ZeroCD
 
-DIY USB CD-ROM и LAN адаптер на Raspberry Pi Zero 2 W
+DIY USB CD-ROM and LAN adapter for Raspberry Pi Zero 2 W
 
 ![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi%20Zero%202%20W-green)
 ![Python](https://img.shields.io/badge/python-3.9+-blue)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
-## Возможности
+## Features
 
-- **USB Gadget Mode** - эмуляция CD-ROM через USB
-- **USB Ethernet** - сетевой адаптер через USB (RNDIS)
-- **1.3" ST7789 LCD** - отображение меню и статуса
-- **WiFi управление** - загрузка ISO через WebUI
-- **Captive Portal** - настройка WiFi без подключения к сети
+- **USB Gadget Mode** - CD-ROM emulation via USB
+- **USB Ethernet** - Network adapter via USB (RNDIS)
+- **1.3" ST7789 LCD** - Menu and status display
+- **WiFi Management** - ISO upload via WebUI
+- **Captive Portal** - WiFi setup without network connection
 
-## Требования
+## Requirements
 
-### Аппаратное обеспечение
-- Raspberry Pi Zero 2 W (с WiFi)
+### Hardware
+- Raspberry Pi Zero 2 W
 - ST7789 1.3" LCD HAT (240x240)
-- USB кабель (для питания и данных)
-- MicroSD карта
+- USB cable (for power and data)
+- MicroSD card
 
-### Программное обеспечение
-- Raspberry Pi OS Lite (или совместимая)
+### Software
+- Raspberry Pi OS Lite (or compatible)
 - Python 3.9+
 
-## Установка
+## Installation
 
 ```bash
-# Клонировать репозиторий
+# Clone repository
 cd /opt
-sudo git clone https://github.com/your-repo/ZeroCD.git
+sudo git clone https://github.com/Sergey004/ZeroCD
 cd ZeroCD
 
-# Запустить установщик
+# Run installer
 sudo ./install.sh
 ```
 
-Установщик автоматически:
-- Установит системные зависимости (hostapd, dnsmasq, iptables)
-- Установит Python пакеты (Flask, Pillow, numpy)
-- Скачает шрифты (Font Awesome, DejaVu Sans)
-- Включит SPI интерфейс
-- Создаст systemd сервис (опционально)
+Installer will automatically:
+- Install system dependencies (hostapd, dnsmasq, iptables)
+- Install Python packages (Flask, Pillow, numpy)
+- Download fonts (Font Awesome, DejaVu Sans)
+- Enable SPI interface
+- Create systemd service (optional)
 
-## Использование
+## Usage
 
-### Запуск на Raspberry Pi
+### Run on Raspberry Pi
 
 ```bash
 sudo python3 main.py
 ```
 
-### Режим эмуляции на PC
+### PC Emulation Mode
 
 ```bash
 ZEROCD_PLATFORM=pc python3 main.py
 ```
 
-### Управление
+### Controls
 
-| Кнопка | Действие |
-|--------|----------|
-| w/s | Навигация вверх/вниз |
-| Enter | Выбрать ISO |
-| d | Меню WiFi |
-| q | Выход |
+| Button | Action |
+|--------|--------|
+| w/s | Navigate up/down |
+| Enter | Select ISO |
+| d | WiFi menu |
+| q | Quit |
 
 ## WebUI
 
-WebUI доступен только при подключённом WiFi и **НЕ** в режиме USB Gadget (для экономии питания).
+WebUI is only available when WiFi is connected and NOT in USB Gadget mode (to save power).
 
-### Доступ
+### Access
 
 ```
 http://<IP>:8080
 ```
 
-IP адрес отображается на дисплее при подключении к WiFi.
+IP address is shown on display when connected to WiFi.
 
-### Функции WebUI
+### WebUI Features
 
-- **Список ISO** - просмотр и выбор загруженных образов
-- **Загрузка файлов** - загрузка ISO с компьютера (drag&drop)
-- **Скачивание по URL** - загрузка образов из интернета
-- **Настройки WiFi** - подключение к сети, управление точками доступа
+- **ISO List** - View and select uploaded images
+- **File Upload** - Upload ISO from computer (drag&drop)
+- **Download from URL** - Download images from internet
+- **WiFi Settings** - Network connection, access point management
 
-### Популярные образы для загрузки
+### Popular Images for Download
 
 - Ubuntu Desktop 22.04/24.04
 - Debian 12 Live
@@ -97,78 +97,78 @@ IP адрес отображается на дисплее при подключ
 - Linux Mint
 - Netboot.xyz
 
-## WiFi и Captive Portal
+## WiFi and Captive Portal
 
-### Автозапуск Captive Portal
+### Auto-start Captive Portal
 
-Если при загрузке не найдена сохранённая сеть, автоматически запускается точка доступа (Captive Portal).
+If no saved network is found at boot, access point (Captive Portal) starts automatically.
 
-### Подключение к WiFi
+### Connect to WiFi
 
-1. Подключитесь к точке доступа `ZeroCD-XXXX`
-2. Введите пароль (отображается на LCD)
-3. Откройте браузер - откроется страница настройки
-4. Введите данные вашей WiFi сети
-5. После подключения Captive Portal остановится
+1. Connect to access point `ZeroCD-XXXX`
+2. Enter password (shown on LCD)
+3. Open browser - setup page opens
+4. Enter your WiFi network credentials
+5. After connection, Captive Portal stops
 
-### QR код
+### QR Code
 
-На LCD отображается QR код для быстрого подключения к точке доступа.
+LCD displays QR code for quick connection to access point.
 
-## Структура проекта
+## Project Structure
 
 ```
 ZeroCD/
-├── config.py          # Конфигурация
-├── main.py            # Главная программа
-├── install.sh         # Скрипт установки
-├── requirements.txt   # Python зависимости
-├── ui/                # UI для LCD
-│   ├── display.py     # ST7789 драйвер
-│   ├── display_pc.py # Эмулятор для PC
-│   ├── renderer.py   # Рендеринг текста и иконок
-│   └── menu.py       # Обработка меню
-├── net/               # Сетевые функции
-│   ├── wifi.py       # WiFi менеджер
+├── config.py          # Configuration
+├── main.py            # Main program
+├── install.sh         # Installation script
+├── requirements.txt   # Python dependencies
+├── ui/                # LCD UI
+│   ├── display.py     # ST7789 driver
+│   ├── display_pc.py # PC emulator
+│   ├── renderer.py   # Text and icon rendering
+│   └── menu.py       # Menu handling
+├── net/               # Network functions
+│   ├── wifi.py       # WiFi manager
 │   └── captive.py    # Captive Portal
 ├── web/               # WebUI
-│   ├── server.py     # Flask сервер
-│   └── templates/    # HTML шаблоны
+│   ├── server.py     # Flask server
+│   └── templates/    # HTML templates
 ├── usb/               # USB Gadget
-│   ├── gadget.py     # USB настройка
-│   └── iso_manager.py# Управление ISO
-├── input/             # Ввод
-│   └── joystick.py   # GPIO джойстик
-└── system/            # Система
-    └── logger.py     # Логирование
+│   ├── gadget.py     # USB setup
+│   └── iso_manager.py# ISO management
+├── input/             # Input
+│   └── joystick.py   # GPIO joystick
+└── system/            # System
+    └── logger.py     # Logging
 ```
 
-## Известные ограничения
+## Known Limitations
 
-1. **Pi Zero 2 W only** - требуется встроенный WiFi адаптер
-2. **USB Gadget Mode** - WebUI недоступен для экономии питания
-3. **Один сетевой профиль** - сохраняется только одна WiFi сеть
+1. **Pi Zero 2 W only** - requires built-in WiFi adapter
+2. **USB Gadget Mode** - WebUI disabled to save power
+3. **Single network profile** - only one WiFi network is saved
 
-## Разработка
+## Development
 
-### Тестирование UI на PC
+### Test UI on PC
 
 ```bash
 python test_display.py --interactive
 ```
 
-### Тестирование рендерера
+### Test renderer
 
 ```bash
 python test_display.py --renderer
 ```
 
-## Лицензия
+## License
 
 MIT License
 
-## Благодарности
+## Credits
 
-- [Raspyjack](https://github.com/who-is-hu/Raspyjack) - вдохновение для UI и WebUI
-- [Waveshare](https://www.waveshare.com) - драйвер ST7789
-- [Font Awesome](https://fontawesome.com) - иконки
+- [Raspyjack](https://github.com/7h30th3r0n3/Raspyjack) - UI and WebUI inspiration
+- [Waveshare](https://www.waveshare.com) - ST7789 driver
+- [Font Awesome](https://fontawesome.com) - Icons
