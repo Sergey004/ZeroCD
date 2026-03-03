@@ -1,6 +1,6 @@
 """
 ST7789 display controller for 1.3" HAT
-ZeroCD - DIY USB CD-ROM и LAN адаптер на Raspberry Pi Zero 2 W
+ZeroCD - DIY USB CD-ROM and LAN adapter for Raspberry Pi Zero 2 W
 Based on Raspyjack style (PIL + NumPy)
 """
 import time

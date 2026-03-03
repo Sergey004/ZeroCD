@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -65,19 +65,19 @@
     <div class="container">
         {% if gadget_mode %}
         <div class="warning-banner">
-            ⚠️ <strong>Режим USB Gadget активен</strong> - WebUI недоступен для экономии питания
+            WARNING: USB Gadget Mode active - WebUI disabled to save power
         </div>
         {% endif %}
         
         <header>
             <h1>ZeroCD</h1>
-            <div class="subtitle">USB CD-ROM + LAN адаптер</div>
+            <div class="subtitle">USB CD-ROM + LAN Adapter</div>
             
             <div class="status-bar">
                 <div class="status-item">
                     <span class="status-label">Wi-Fi:</span>
                     <span class="status-value {% if wifi_connected %}connected{% else %}disconnected{% endif %}">
-                        {{ wifi_ssid if wifi_connected else 'Отключено' }}
+                        {{ wifi_ssid if wifi_connected else 'Disconnected' }}
                     </span>
                 </div>
                 {% if wifi_ip %}
@@ -87,7 +87,7 @@
                 </div>
                 {% endif %}
                 <div class="status-item">
-                    <span class="status-label">Хранилище:</span>
+                    <span class="status-label">Storage:</span>
                     <span class="status-value">{{ disk_percent }}%</span>
                 </div>
             </div>
@@ -95,14 +95,14 @@
         
         <nav>
             <a href="/" class="active">ISO</a>
-            <a href="/upload">Загрузить</a>
-            <a href="/download">Скачать</a>
-            <a href="/settings">Настройки</a>
+            <a href="/upload">Upload</a>
+            <a href="/download">Download</a>
+            <a href="/settings">Settings</a>
         </nav>
         
         <div class="disk-info">
             <div style="display: flex; justify-content: space-between;">
-                <span>Диск: {{ format_size(disk_used) }} / {{ format_size(disk_total) }}</span>
+                <span>Disk: {{ format_size(disk_used) }} / {{ format_size(disk_total) }}</span>
                 <span>{{ disk_percent }}%</span>
             </div>
             <div class="disk-bar">
@@ -111,14 +111,14 @@
         </div>
         
         <div class="actions">
-            <a href="/upload" class="btn btn-primary">+ Загрузить файл</a>
-            <a href="/download" class="btn btn-secondary">↓ Скачать по URL</a>
+            <a href="/upload" class="btn btn-primary">+ Upload File</a>
+            <a href="/download" class="btn btn-secondary">Download from URL</a>
         </div>
         
         <div class="iso-list">
             <div class="iso-header">
-                <span class="iso-title">ISO файлы</span>
-                <span class="iso-count">{{ isos|length }} файлов</span>
+                <span class="iso-title">ISO Files</span>
+                <span class="iso-count">{{ isos|length }} files</span>
             </div>
             
             {% if isos %}
@@ -130,15 +130,15 @@
                         <div class="iso-size">{{ total_size }}</div>
                     </div>
                     <div class="iso-actions">
-                        <button class="iso-btn select" onclick="selectIso('{{ iso }}')">Выбрать</button>
+                        <button class="iso-btn select" onclick="selectIso('{{ iso }}')">Select</button>
                         <button class="iso-btn delete" onclick="deleteIso('{{ iso }}')">✕</button>
                     </div>
                 </div>
                 {% endfor %}
             {% else %}
                 <div class="empty-state">
-                    <p>Нет ISO файлов</p>
-                    <p style="margin-top: 10px;">Загрузите образы для использования</p>
+                    <p>No ISO files</p>
+                    <p style="margin-top: 10px;">Upload images to use</p>
                 </div>
             {% endif %}
         </div>
@@ -151,12 +151,12 @@
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({filename: name})
             }).then(r => r.json()).then(data => {
-                if (data.success) alert('Выбран: ' + name);
+                if (data.success) alert('Selected: ' + name);
             });
         }
         
         function deleteIso(name) {
-            if (!confirm('Удалить ' + name + '?')) return;
+            if (!confirm('Delete ' + name + '?')) return;
             fetch('/api/delete', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},

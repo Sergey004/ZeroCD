@@ -29,6 +29,15 @@ from system.logger import get_logger
 app = Flask(__name__, template_folder='templates', static_folder='static')
 app.secret_key = WEBUI_SECRET_KEY
 
+@app.template_filter('format_size')
+def format_size_filter(bytes_size):
+    """Format bytes to human readable size."""
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+        if bytes_size < 1024.0:
+            return f"{bytes_size:.1f} {unit}"
+        bytes_size /= 1024.0
+    return f"{bytes_size:.1f} PB"
+
 logger = get_logger("webui")
 
 iso_manager = ISOManager(ISO_DIR)
@@ -45,10 +54,10 @@ def check_gadget_mode():
         return """
         <html><head><title>ZeroCD - Unavailable</title></head>
         <body style="font-family: sans-serif; padding: 40px; text-align: center;">
-            <h1>WebUI недоступен</h1>
-            <p>В режиме USB Gadget (эмуляция CD-ROM) WebUI отключён для экономии питания.</p>
-            <p>Отключите USB кабель и перезагрузите устройство для использования WebUI.</p>
-            <a href="/">Вернуться</a>
+        <h1>WebUI Unavailable</h1>
+        <p>In USB Gadget mode (CD-ROM emulation) WebUI is disabled to save power.</p>
+        <p>Disconnect USB cable and reboot device to use WebUI.</p>
+        <a href="/">Go Back</a>
         </body></html>
         """, 503
 

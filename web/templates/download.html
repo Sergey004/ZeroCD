@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Скачать ISO - ZeroCD</title>
+    <title>Download ISO - ZeroCD</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; }
@@ -44,25 +44,25 @@
 </head>
 <body>
     <div class="container">
-        <header><h1>Скачать ISO</h1></header>
+        <header><h1>Download ISO</h1></header>
         
         <nav>
             <a href="/">ISO</a>
-            <a href="/upload">Загрузить</a>
-            <a href="/download" class="active">Скачать</a>
-            <a href="/settings">Настройки</a>
+            <a href="/upload">Upload</a>
+            <a href="/download" class="active">Download</a>
+            <a href="/settings">Settings</a>
         </nav>
         
         <div class="card">
             <div class="form-group">
-                <label>URL образа</label>
+                <label>Image URL</label>
                 <input type="url" id="urlInput" placeholder="https://example.com/image.iso">
             </div>
             <div class="form-group">
-                <label>Имя файла (опционально)</label>
+                <label>Filename (optional)</label>
                 <input type="text" id="nameInput" placeholder="my-distro.iso">
             </div>
-            <button class="btn btn-primary" onclick="startDownload()">Скачать</button>
+            <button class="btn btn-primary" onclick="startDownload()">Download</button>
             
             <div class="progress" id="progress">
                 <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
@@ -74,7 +74,7 @@
         </div>
         
         <div class="popular">
-            <div class="popular-title">Популярные образы:</div>
+            <div class="popular-title">Popular Images:</div>
             <div class="popular-list">
                 {% for iso in popular_isos %}
                 <div class="popular-item">
@@ -82,7 +82,7 @@
                         <div class="popular-name">{{ iso.name }}</div>
                         <div class="popular-size">{{ iso.size }}</div>
                     </div>
-                    <button class="popular-download" onclick="downloadPopular('{{ iso.url }}', '{{ iso.name }}.iso')">Скачать</button>
+                    <button class="popular-download" onclick="downloadPopular('{{ iso.url }}', '{{ iso.name }}.iso')">Download</button>
                 </div>
                 {% endfor %}
             </div>
@@ -97,7 +97,7 @@
             url = url || document.getElementById('urlInput').value;
             name = name || document.getElementById('nameInput').value || 'download.iso';
             
-            if (!url) return alert('Введите URL');
+            if (!url) return alert('Enter URL');
             
             fetch('/api/download', {
                 method: 'POST',
@@ -109,7 +109,7 @@
                     document.getElementById('progress').style.display = 'block';
                     pollInterval = setInterval(checkStatus, 1000);
                 } else {
-                    alert(data.error || 'Ошибка');
+                    alert(data.error || 'Error');
                 }
             });
         }
@@ -132,11 +132,11 @@
                 
                 if (task.status === 'complete') {
                     clearInterval(pollInterval);
-                    alert('Загрузка завершена!');
+                    alert('Download complete!');
                     window.location.href = '/';
                 } else if (task.status === 'error') {
                     clearInterval(pollInterval);
-                    alert('Ошибка: ' + (task.error || 'unknown'));
+                    alert('Error: ' + (task.error || 'unknown'));
                 }
             });
         }

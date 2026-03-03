@@ -1,6 +1,6 @@
 """
 Text rendering utilities for ST7789 display
-ZeroCD - DIY USB CD-ROM и LAN адаптер на Raspberry Pi Zero 2 W
+ZeroCD - DIY USB CD-ROM and LAN adapter for Raspberry Pi Zero 2 W
 Using Font Awesome like Raspyjack
 """
 from typing import List, Tuple, Optional

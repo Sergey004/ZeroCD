@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Настройки WiFi - ZeroCD</title>
+    <title>WiFi Settings - ZeroCD</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; }
@@ -50,95 +50,95 @@
 </head>
 <body>
     <div class="container">
-        <header><h1>Настройки WiFi</h1></header>
+        <header><h1>WiFi Settings</h1></header>
         
         <nav>
             <a href="/">ISO</a>
-            <a href="/upload">Загрузить</a>
-            <a href="/download">Скачать</a>
-            <a href="/settings" class="active">Настройки</a>
+            <a href="/upload">Upload</a>
+            <a href="/download">Download</a>
+            <a href="/settings" class="active">Settings</a>
         </nav>
         
         <div class="card">
-            <div class="section-title">Текущий статус</div>
+            <div class="section-title">Current Status</div>
             
             <div class="status-row">
-                <span class="status-label">Состояние</span>
+                <span class="status-label">Status</span>
                 <span class="status-value {% if wifi_connected %}on{% else %}off{% endif %}">
-                    {{ 'Подключено' if wifi_connected else 'Отключено' }}
+                    {{ 'Connected' if wifi_connected else 'Disconnected' }}
                 </span>
             </div>
             
             {% if wifi_connected %}
             <div class="status-row">
-                <span class="status-label">Сеть (SSID)</span>
+                <span class="status-label">Network (SSID)</span>
                 <span class="status-value">{{ wifi_ssid }}</span>
             </div>
             <div class="status-row">
-                <span class="status-label">IP адрес</span>
+                <span class="status-label">IP Address</span>
                 <span class="status-value">{{ wifi_ip }}</span>
             </div>
             <div class="status-row">
-                <span class="status-label">Действия</span>
-                <button class="btn btn-danger" onclick="disconnectWifi()">Отключиться</button>
+                <span class="status-label">Actions</span>
+                <button class="btn btn-danger" onclick="disconnectWifi()">Disconnect</button>
             </div>
             {% else %}
             <div class="status-row">
-                <span class="status-label">Действия</span>
-                <button class="btn btn-primary" onclick="document.getElementById('connectForm').style.display='block'">Подключиться</button>
+                <span class="status-label">Actions</span>
+                <button class="btn btn-primary" onclick="document.getElementById('connectForm').style.display='block'">Connect</button>
             </div>
             {% endif %}
         </div>
         
         <div class="card" id="connectForm" {% if wifi_connected %}style="display:none"{% endif %}>
-            <div class="section-title">Подключиться к сети</div>
+            <div class="section-title">Connect to Network</div>
             
             <div class="form-group">
-                <label>SSID (название сети)</label>
+                <label>SSID (Network Name)</label>
                 <input type="text" id="ssidInput" placeholder="MyWiFi">
             </div>
             <div class="form-group">
-                <label>Пароль</label>
-                <input type="password" id="passwordInput" placeholder="Пароль">
+                <label>Password</label>
+                <input type="password" id="passwordInput" placeholder="Password">
             </div>
-            <button class="btn btn-primary" style="width:100%" onclick="connectWifi()">Подключиться</button>
+            <button class="btn btn-primary" style="width:100%" onclick="connectWifi()">Connect</button>
             
             <button class="btn scan-btn" style="margin-top:10px; background:#0f3460; color:#888" onclick="scanNetworks()">
-                🔍 Сканировать сети
+                🔍 Scan Networks
             </button>
             
             <div class="network-list" id="networkList"></div>
         </div>
         
         <div class="card">
-            <div class="section-title">Точка доступа (Captive Portal)</div>
+            <div class="section-title">Access Point (Captive Portal)</div>
             
             <div class="status-row">
                 <span class="status-label">SSID</span>
                 <span class="status-value">{{ ap_ssid }}</span>
             </div>
             <div class="status-row">
-                <span class="status-label">Пароль</span>
+                <span class="status-label">Password</span>
                 <span class="status-value">{{ ap_password }}</span>
             </div>
             <div class="status-row">
-                <span class="status-label">IP адрес</span>
+                <span class="status-label">IP Address</span>
                 <span class="status-value">{{ ap_ip }}</span>
             </div>
             
             <div style="margin-top: 15px;">
                 <div class="qr-code" id="qrCode"></div>
                 <p style="color:#888;font-size:0.85rem;margin-top:10px">
-                    Отсканируйте QR код для подключения к точке доступа
+                    Scan QR code to connect to access point
                 </p>
             </div>
         </div>
         
         {% if wifi_ssid %}
         <div class="card">
-            <div class="section-title">Управление сетью</div>
+            <div class="section-title">Network Management</div>
             <button class="btn btn-danger" style="width:100%" onclick="forgetNetwork()">
-                Забыть сеть {{ wifi_ssid }}
+                Forget Network {{ wifi_ssid }}
             </button>
         </div>
         {% endif %}
@@ -161,10 +161,10 @@
                 body: JSON.stringify({ssid, password})
             }).then(r => r.json()).then(data => {
                 if (data.success) {
-                    alert('Подключено к ' + ssid);
+                    alert('Connected to ' + ssid);
                     location.reload();
                 } else {
-                    alert(data.error || 'Ошибка подключения');
+                    alert(data.error || 'Connection error');
                 }
             });
         }
@@ -174,7 +174,7 @@
         }
         
         function forgetNetwork() {
-            if (!confirm('Забыть сохранённую сеть?')) return;
+            if (!confirm('Forget saved network?')) return;
             fetch('/api/wifi/forget', {method: 'POST'}).then(r => r.json()).then(() => location.reload());
         }
         

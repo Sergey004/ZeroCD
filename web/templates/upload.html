@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Загрузить ISO - ZeroCD</title>
+    <title>Upload ISO - ZeroCD</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; }
@@ -42,22 +42,22 @@
 <body>
     <div class="container">
         <header>
-            <h1>Загрузить ISO</h1>
+            <h1>Upload ISO</h1>
         </header>
         
         <nav>
             <a href="/">ISO</a>
-            <a href="/upload" class="active">Загрузить</a>
-            <a href="/download">Скачать</a>
-            <a href="/settings">Настройки</a>
+            <a href="/upload" class="active">Upload</a>
+            <a href="/download">Download</a>
+            <a href="/settings">Settings</a>
         </nav>
         
         <div class="card">
             <div class="drop-zone" id="dropZone">
                 <div class="drop-icon">📁</div>
-                <div class="drop-text">Перетащите файл ISO сюда</div>
-                <div class="drop-text">или</div>
-                <button class="btn" onclick="document.getElementById('fileInput').click()">Выбрать файл</button>
+                <div class="drop-text">Drag and drop ISO file here</div>
+                <div class="drop-text">or</div>
+                <button class="btn" onclick="document.getElementById('fileInput').click()">Choose File</button>
             </div>
             
             <input type="file" id="fileInput" accept=".iso">
@@ -66,7 +66,7 @@
                 <div class="progress-bar">
                     <div class="progress-fill" id="progressFill"></div>
                 </div>
-                <div class="progress-text" id="progressText">Загрузка...</div>
+                <div class="progress-text" id="progressText">Uploading...</div>
             </div>
             
             <div class="result" id="result"></div>
@@ -100,7 +100,7 @@
         
         function uploadFile(file) {
             if (!file.name.endsWith('.iso')) {
-                showResult('Только файлы .iso!', 'error');
+                showResult('Only .iso files allowed!', 'error');
                 return;
             }
             
@@ -118,28 +118,28 @@
                     const percent = (e.loaded / e.total * 100).toFixed(0);
                     document.getElementById('progressFill').style.width = percent + '%';
                     document.getElementById('progressText').textContent = 
-                        `Загрузка: ${percent}% (${formatSize(e.loaded)} / ${formatSize(e.total)})`;
+                        `Uploading: ${percent}% (${formatSize(e.loaded)} / ${formatSize(e.total)})`;
                 }
             });
             
             xhr.addEventListener('load', () => {
                 document.getElementById('progress').style.display = 'none';
                 if (xhr.status === 200) {
-                    showResult('Файл загружен! Перенаправление...', 'success');
+                    showResult('File uploaded! Redirecting...', 'success');
                     setTimeout(() => window.location.href = '/', 1500);
                 } else {
                     try {
                         const data = JSON.parse(xhr.responseText);
-                        showResult(data.error || 'Ошибка загрузки', 'error');
+                        showResult(data.error || 'Upload failed', 'error');
                     } catch {
-                        showResult('Ошибка загрузки', 'error');
+                        showResult('Upload failed', 'error');
                     }
                 }
             });
             
             xhr.addEventListener('error', () => {
                 document.getElementById('progress').style.display = 'none';
-                showResult('Ошибка соединения', 'error');
+                showResult('Connection error', 'error');
             });
             
             xhr.open('POST', '/upload');

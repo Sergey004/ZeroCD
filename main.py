@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ZeroCD - DIY USB CD-ROM и LAN адаптер на Raspberry Pi Zero 2 W
+ZeroCD - DIY USB CD-ROM and LAN adapter for Raspberry Pi Zero 2 W
 
 PC Mode: Set ZEROCD_PLATFORM=pc to run with curses TUI
 """
