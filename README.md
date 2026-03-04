@@ -4,7 +4,7 @@ DIY USB CD-ROM and LAN adapter for Raspberry Pi Zero 2 W
 
 ![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi%20Zero%202%20W-green)
 ![Python](https://img.shields.io/badge/python-3.9+-blue)
-![License](https://img.shields.io/badge/license-MIT-orange)
+![License](https://img.shields.io/badge/license-GPL-orange)
 
 ## Features
 
