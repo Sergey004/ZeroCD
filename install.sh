@@ -110,6 +110,24 @@ fi
 log_info "Refreshing font cache..."
 fc-cache -f > /dev/null 2>&1 || true
 
+# Install uMTP-Responder
+log_info "Installing uMTP-Responder..."
+mkdir -p /etc/umtprd
+cp "$ZEROCD_DIR/conf/umtprd.conf" /etc/umtprd/umtprd.conf
+
+cd "$ZEROCD_DIR/uMTP-Responder"
+if command -v make &> /dev/null; then
+    make -j$(nproc)
+    if [ -f umtprd ]; then
+        cp umtprd /usr/local/bin/
+        log_info "uMTP-Responder installed"
+    fi
+else
+    log_warn "make not found, skipping uMTP-Responder build"
+fi
+
+cd "$ZEROCD_DIR"
+
 # Enable SPI interface (Raspberry Pi only)
 if [ "$IS_RPI" = true ]; then
     log_info "Enabling SPI interface..."

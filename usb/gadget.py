@@ -1,9 +1,11 @@
 """
-USB Gadget manager for CD-ROM and Ethernet emulation
+USB Gadget manager for CD-ROM, Ethernet and MTP emulation
 """
 import os
+import subprocess
+import signal
 from enum import Enum
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from config import GADGET_DIR, GADGET_UDC, ISO_DIR
 from system.logger import get_logger
 
@@ -17,12 +19,13 @@ class GadgetState(Enum):
 
 class GadgetManager:
     """
-    Manages USB gadget configuration for mass storage and network.
+    Manages USB gadget configuration for mass storage, network and MTP.
 
     Gadget structure:
     - mass_storage.0: CD-ROM emulation with ISO files
     - rndis.usb0: RNDIS Ethernet
     - ecm.usb0: CDC ECM Ethernet
+    - ffs.mtp: MTP via FunctionFS
     """
 
     def __init__(self):
@@ -30,6 +33,8 @@ class GadgetManager:
         self.state = GadgetState.UNBOUND
         self.current_iso: Optional[str] = None
         self.udc_path = GADGET_UDC
+        self.mtp_process: Optional[subprocess.Popen] = None
+        self.mtp_enabled = False
 
     def init(self) -> bool:
         """Initialize USB gadget configuration."""
@@ -92,7 +97,7 @@ class GadgetManager:
         return {
             'state': self.state.value,
             'current_iso': self.current_iso,
-            'functions': ['mass_storage', 'rndis', 'ecm'],
+            'functions': ['mass_storage', 'rndis', 'ecm', 'mtp'],
         }
 
     def get_functions(self) -> Dict[str, bool]:
@@ -101,14 +106,19 @@ class GadgetManager:
             'mass_storage': True,
             'rndis': True,
             'ecm': True,
+            'mtp': self.mtp_enabled,
         }
 
     def enable_function(self, name: str) -> bool:
         """Enable a USB function."""
+        if name == 'mtp':
+            return self.start_mtp()
         return True
 
     def disable_function(self, name: str) -> bool:
         """Disable a USB function."""
+        if name == 'mtp':
+            return self.stop_mtp()
         return True
 
     def shutdown(self):
@@ -120,4 +130,83 @@ class GadgetManager:
 
     def _cleanup(self):
         """Remove gadget configuration."""
-        pass
+        if self.mtp_enabled:
+            self.stop_mtp()
+
+    def start_mtp(self, iso_dir: str = ISO_DIR) -> bool:
+        """Start MTP responder via FunctionFS."""
+        if self.mtp_enabled:
+            self.logger.info("MTP already running")
+            return True
+
+        self.logger.info("Starting MTP responder")
+
+        script_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "scripts", "setup_mtp.sh"
+        )
+
+        if not os.path.exists(script_path):
+            self.logger.error(f"MTP setup script not found: {script_path}")
+            return False
+
+        try:
+            result = subprocess.run(
+                ["sudo", "bash", script_path],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            if result.returncode != 0:
+                self.logger.error(f"MTP setup failed: {result.stderr}")
+                return False
+
+            self.mtp_enabled = True
+            self.logger.info("MTP responder started successfully")
+            return True
+
+        except subprocess.TimeoutExpired:
+            self.logger.error("MTP setup timed out")
+            return False
+        except Exception as e:
+            self.logger.error(f"Failed to start MTP: {e}")
+            return False
+
+    def stop_mtp(self) -> bool:
+        """Stop MTP responder."""
+        if not self.mtp_enabled:
+            return True
+
+        self.logger.info("Stopping MTP responder")
+
+        try:
+            subprocess.run(["pkill", "-9", "umtprd"], capture_output=True)
+            subprocess.run(["sudo", "umount", "/dev/ffs-mtp"], capture_output=True)
+
+            self.mtp_enabled = False
+            self.mtp_process = None
+            self.logger.info("MTP responder stopped")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to stop MTP: {e}")
+            return False
+
+    def get_mtp_status(self) -> Dict[str, Any]:
+        """Get MTP responder status."""
+        return {
+            'enabled': self.mtp_enabled,
+            'running': self.mtp_process is not None if self.mtp_process else False,
+        }
+
+    def set_functions(self, functions: List[str]) -> bool:
+        """Set enabled USB functions."""
+        self.logger.info(f"Setting USB functions: {functions}")
+
+        if 'mtp' in functions and not self.mtp_enabled:
+            return self.start_mtp()
+        elif 'mtp' not in functions and self.mtp_enabled:
+            return self.stop_mtp()
+
+        return True

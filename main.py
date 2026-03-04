@@ -43,6 +43,7 @@ class ZeroCDApp:
         self.active_iso = None
         self.wifi_enabled = False
         self.usb_connected = False
+        self.mtp_enabled = False
         self.running = False
 
     def init(self) -> bool:
@@ -100,7 +101,7 @@ class ZeroCDApp:
         elif direction == Direction.RIGHT:
             self.toggle_wifi()
         elif direction == Direction.LEFT:
-            pass
+            self.toggle_mtp()
 
         self.update_display()
 
@@ -114,6 +115,20 @@ class ZeroCDApp:
                 self.wifi_enabled = True
                 self.logger.info("Wi-Fi enabled")
 
+    def toggle_mtp(self):
+        if not self.gadget:
+            return
+
+        if self.mtp_enabled:
+            if self.gadget.stop_mtp():
+                self.mtp_enabled = False
+                self.logger.info("MTP disabled")
+        else:
+            if self.gadget.start_mtp():
+                self.mtp_enabled = True
+                self.logger.info("MTP enabled")
+        self.update_display()
+
     def update_display(self):
         if self.display:
             self.display.draw_menu(
@@ -121,7 +136,8 @@ class ZeroCDApp:
                 selected_index=self.menu.get_index() if self.menu else 0,
                 active_iso=self.active_iso,
                 wifi_on=self.wifi_enabled,
-                usb_bound=self.usb_connected
+                usb_bound=self.usb_connected,
+                mtp_on=self.mtp_enabled
             )
             if hasattr(self.display, 'update'):
                 self.display.update()
@@ -139,7 +155,7 @@ class ZeroCDApp:
             self.gadget.bind()
             self.usb_connected = True
 
-        self.update_display()
+            self.update_display()
 
         if USE_PC_EMULATION:
             self._run_pc_loop()

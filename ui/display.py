@@ -37,7 +37,6 @@ ST7789_COLORS = {
     'GRAY': (127, 127, 127),
 }
 
-
 LCD_RST_PIN = DISPLAY_PINS['rst']
 LCD_DC_PIN = DISPLAY_PINS['dc']
 LCD_CS_PIN = DISPLAY_PINS.get('ce0', 8)
@@ -79,9 +78,7 @@ def GPIO_Init():
 class ST7789:
     """ST7789 display controller using PIL + NumPy like Raspyjack."""
 
-    def __init__(self, dc_pin: int = LCD_DC_PIN,
-                 rst_pin: int = LCD_RST_PIN,
-                 bl_pin: int = LCD_BL_PIN):
+    def __init__(self, dc_pin: int = LCD_DC_PIN, rst_pin: int = LCD_RST_PIN, bl_pin: int = LCD_BL_PIN):
         self.dc_pin = dc_pin
         self.rst_pin = rst_pin
         self.bl_pin = bl_pin
@@ -148,7 +145,7 @@ class ST7789:
             self._write_command(cmd)
             if data:
                 self._write_data(bytes(data))
-            time.sleep(0.01)
+                time.sleep(0.01)
 
     def _write_command(self, cmd: int):
         """Write command byte."""
@@ -184,7 +181,7 @@ class ST7789:
             font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 9 * size)
         except:
             font = ImageFont.load_default()
-        
+
         bbox = self.draw.textbbox((0, 0), text, font=font)
         text_width = bbox[2] - bbox[0]
         x = (self.width - text_width) // 2
@@ -213,7 +210,8 @@ class ST7789:
         selected_index: int,
         active_iso: Optional[str] = None,
         wifi_on: bool = False,
-        usb_bound: bool = False
+        usb_bound: bool = False,
+        mtp_on: bool = False
     ):
         """Draw ISO selection menu like Raspyjack."""
         self.clear(ST7789_COLORS['BLACK'])
@@ -221,7 +219,7 @@ class ST7789:
         self.draw.rectangle((0, 0, 240, 24), fill=ST7789_COLORS['CYAN'])
         self._draw_text(5, 6, " ZeroCD ", ST7789_COLORS['BLACK'])
 
-        status = f" Wi-Fi:{'ON' if wifi_on else 'OFF'} "
+        status = f"Wi-Fi:{'ON' if wifi_on else 'OFF'} MTP:{'ON' if mtp_on else 'OFF'}"
         self._draw_text(240 - len(status) * 9 - 5, 6, status, ST7789_COLORS['WHITE'])
 
         if active_iso:
@@ -258,7 +256,7 @@ class ST7789:
             if is_active:
                 self._draw_text(200, y + 8, "*", ST7789_COLORS['YELLOW'])
 
-        self._draw_text(5, 220, "w/s:up/down Enter:select d:Wi-Fi", ST7789_COLORS['YELLOW'])
+        self._draw_text(5, 220, "w/s:nav Enter:sel d:Wi-Fi a:MTP", ST7789_COLORS['YELLOW'])
         self._update()
 
     def _update(self):
@@ -317,10 +315,11 @@ class Display(ST7789):
         selected_index: int,
         active_iso: Optional[str] = None,
         wifi_on: bool = False,
-        usb_bound: bool = False
+        usb_bound: bool = False,
+        mtp_on: bool = False
     ):
         """Draw ISO selection menu."""
-        super().draw_menu(items, selected_index, active_iso, wifi_on, usb_bound)
+        super().draw_menu(items, selected_index, active_iso, wifi_on, usb_bound, mtp_on)
 
     def draw_status(self, wifi_on: bool, usb_bound: bool, active_iso: str):
         """Draw status bar."""
