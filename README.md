@@ -165,7 +165,7 @@ python test_display.py --renderer
 
 ## License
 
-MIT License
+GPL-3.0 license
 
 ## Credits
 
