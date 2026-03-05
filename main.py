@@ -159,23 +159,57 @@ class ZeroCDApp:
     def toggle_mtp(self):
         self.logger.info("MTP toggle requested")
         
-        # Укажите здесь точное имя или путь к вашему C++ файлу! 
-        # (Например: "umtprd" или "/opt/mtp/mtp_server")
-        MTP_COMMAND = "uMTP-Responder/umtprd" 
+        # Команда запуска вашего uMTP-Responder
+        MTP_COMMAND = "umtprd" 
         
         if not self.mtp_enabled:
             self.logger.info("Switching to MTP mode...")
             
-            # 1. Полностью отключаем наш CD/LAN гаджет, чтобы освободить USB-порт
+            # 1. Отключаем CD-ROM гаджет и освобождаем USB-кабель
             if self.gadget:
                 self.gadget.shutdown()
                 self.usb_connected = False
             
-            # 2. Запускаем C++ программу MTP в фоновом режиме
+            import time
+            time.sleep(0.5)
+            
+            # 2. Создаем "скелет" MTP устройства в ядре Linux (ConfigFS)
+            self.logger.info("Setting up MTP USB Gadget...")
+            os.system("sudo mkdir -p /sys/kernel/config/usb_gadget/mtp")
+            os.system("sudo sh -c 'echo 0x1D6B > /sys/kernel/config/usb_gadget/mtp/idVendor'")
+            os.system("sudo sh -c 'echo 0x0100 > /sys/kernel/config/usb_gadget/mtp/idProduct'")
+            
+            os.system("sudo mkdir -p /sys/kernel/config/usb_gadget/mtp/strings/0x409")
+            os.system("sudo sh -c 'echo \"ZeroCD\" > /sys/kernel/config/usb_gadget/mtp/strings/0x409/manufacturer'")
+            os.system("sudo sh -c 'echo \"ZeroCD MTP\" > /sys/kernel/config/usb_gadget/mtp/strings/0x409/product'")
+            
+            os.system("sudo mkdir -p /sys/kernel/config/usb_gadget/mtp/configs/c.1/strings/0x409")
+            os.system("sudo sh -c 'echo \"MTP\" > /sys/kernel/config/usb_gadget/mtp/configs/c.1/strings/0x409/configuration'")
+            
+            # 3. Указываем, что это будет FunctionFS (чтобы C++ мог перехватить управление)
+            os.system("sudo mkdir -p /sys/kernel/config/usb_gadget/mtp/functions/ffs.mtp")
+            os.system("sudo ln -s /sys/kernel/config/usb_gadget/mtp/functions/ffs.mtp /sys/kernel/config/usb_gadget/mtp/configs/c.1/")
+            
+            # 4. Монтируем конечные точки (те самые ep0, ep1, ep2) для uMTP-Responder
+            os.system("sudo mkdir -p /dev/ffs-mtp")
+            os.system("sudo mount -t functionfs mtp /dev/ffs-mtp")
+            
+            # 5. Запускаем C++ программу
             try:
-                self.mtp_process = subprocess.Popen(["sudo", MTP_COMMAND]) 
+                self.mtp_process = subprocess.Popen(["sudo", MTP_COMMAND])
                 self.mtp_enabled = True
-                self.logger.info(f"MTP started successfully ({MTP_COMMAND})")
+                self.logger.info("uMTP-Responder started. Waiting for endpoints...")
+                
+                # Даем C++ программе 1 секунду, чтобы она прописала дескрипторы в ep0
+                time.sleep(1)
+                
+                # 6. Включаем USB! Ищем UDC контроллер и привязываем его к нашему MTP
+                udc_list = os.listdir("/sys/class/udc/")
+                if udc_list:
+                    udc = udc_list[0]
+                    os.system(f"sudo sh -c 'echo {udc} > /sys/kernel/config/usb_gadget/mtp/UDC'")
+                    self.logger.info(f"MTP connected to USB ({udc})")
+                
             except Exception as e:
                 self.logger.error(f"Failed to start MTP: {e}")
                 self.mtp_enabled = False
@@ -183,35 +217,41 @@ class ZeroCDApp:
         else:
             self.logger.info("Stopping MTP mode and restoring CD-ROM...")
             
-            # 1. Убиваем C++ программу
+            # 1. Отключаем MTP гаджет от ПК
+            os.system("sudo sh -c 'echo \"\n\" > /sys/kernel/config/usb_gadget/mtp/UDC'")
+            import time
+            time.sleep(0.5)
+            
+            # 2. Убиваем C++ программу
             if hasattr(self, 'mtp_process') and self.mtp_process:
                 self.mtp_process.terminate()
-                try:
-                    self.mtp_process.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    self.mtp_process.kill()
-            
-            # На всякий случай добиваем процесс через pkill
-            subprocess.run(["sudo", "pkill", "-9", MTP_COMMAND], capture_output=True)
+            os.system(f"sudo pkill -9 {MTP_COMMAND}")
             self.mtp_enabled = False
             
-            # Очищаем возможные остатки конфигов от C++ программы
-            subprocess.run(["sudo", "umount", "-l", "/sys/kernel/config/usb_gadget/mtp"], capture_output=True)
+            # 3. Размонтируем ep0-ep3 и удаляем MTP гаджет из системы
+            os.system("sudo umount /dev/ffs-mtp")
+            os.system("sudo rm /sys/kernel/config/usb_gadget/mtp/configs/c.1/ffs.mtp")
+            os.system("sudo rmdir /sys/kernel/config/usb_gadget/mtp/configs/c.1/strings/0x409")
+            os.system("sudo rmdir /sys/kernel/config/usb_gadget/mtp/configs/c.1")
+            os.system("sudo rmdir /sys/kernel/config/usb_gadget/mtp/functions/ffs.mtp")
+            os.system("sudo rmdir /sys/kernel/config/usb_gadget/mtp/strings/0x409")
+            os.system("sudo rmdir /sys/kernel/config/usb_gadget/mtp")
             
-            # 2. Заново инициализируем наш CD-ROM гаджет
+            time.sleep(0.5)
+            
+            # 4. Заново инициализируем наш CD-ROM + Сеть гаджет
             if self.gadget:
                 if self.gadget.init():
                     if self.gadget.bind():
                         self.usb_connected = True
                     
-                    # 3. Возвращаем активный образ обратно в привод
+                    # Возвращаем активный образ в дисковод
                     if self.active_iso:
                         iso_path = self.iso_manager.get_iso_path(self.active_iso)
                         if iso_path:
                             self.gadget.set_iso(iso_path)
                             
-            self.logger.info("CD-ROM mode restored")
-
+            self.logger.info("CD-ROM mode restored successfully")
     def update_display(self):
         if self.display:
             self.display.draw_menu(
