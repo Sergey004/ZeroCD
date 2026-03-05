@@ -16,8 +16,14 @@ except ImportError:
   
 from PIL import Image, ImageDraw, ImageFont  
   
-from config import DISPLAY_PINS, DISPLAY_WIDTH, DISPLAY_HEIGHT  
-from system.logger import get_logger  
+from config import DISPLAY_PINS, DISPLAY_WIDTH, DISPLAY_HEIGHT, JOYSTICK_PINS
+from system.logger import get_logger
+
+try:
+    from gpiozero import DigitalInputDevice
+    HAS_GPIO = True
+except ImportError:
+    HAS_GPIO = False
   
   
 ST7789_COLORS = {  
@@ -86,12 +92,19 @@ class ST7789:
         self.GPIO_BL_PIN = PWMOutputDevice(self._bl_pin_num, frequency=1000)  
         self.GPIO_BL_PIN.value = 0  # Backlight off initially  
         
-        # Initialize SPI  
-        self.SPI = spidev.SpiDev(0, 0)  
-        self.SPI.max_speed_hz = self._spi_freq  
-        self.SPI.mode = 0b00  
+        # Initialize SPI
+        self.SPI = spidev.SpiDev(0, 0)
+        self.SPI.max_speed_hz = self._spi_freq
+        self.SPI.mode = 0b00
         
-        return True  
+        # Initialize joystick pins like lcd_hat (INPUT with pull_up)
+        self.GPIO_KEY_UP_PIN = DigitalInputDevice(JOYSTICK_PINS['up'], pull_up=True)
+        self.GPIO_KEY_DOWN_PIN = DigitalInputDevice(JOYSTICK_PINS['down'], pull_up=True)
+        self.GPIO_KEY_LEFT_PIN = DigitalInputDevice(JOYSTICK_PINS['left'], pull_up=True)
+        self.GPIO_KEY_RIGHT_PIN = DigitalInputDevice(JOYSTICK_PINS['right'], pull_up=True)
+        self.GPIO_KEY_PRESS_PIN = DigitalInputDevice(JOYSTICK_PINS['press'], pull_up=True)
+
+        return True
     
     def init(self) -> bool:  
         """Initialize display hardware."""  
@@ -208,10 +221,16 @@ class ST7789:
         
         self._command(0x2C)  
     
-    def _backlight(self, on: bool):  
-        """Control backlight."""  
-        if self.GPIO_BL_PIN:  
-            self.GPIO_BL_PIN.value = 1.0 if on else 0.0  
+    def _backlight(self, on: bool):
+        """Control backlight."""
+        if self.GPIO_BL_PIN:
+            self.GPIO_BL_PIN.value = 1.0 if on else 0.0
+
+    def digital_read(self, pin):
+        """Read pin value like lcd_hat. Returns 0 when pressed (active LOW)."""
+        if pin:
+            return 0 if pin.value else 1  # Invert: True=not pressed, False=pressed
+        return 1
     
     def bl_DutyCycle(self, duty: int):  
         """Set backlight duty cycle (0-100)."""  

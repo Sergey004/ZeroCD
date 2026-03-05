@@ -60,7 +60,13 @@ class ZeroCDApp:
             self.gadget = GadgetManagerPC()
         else:
             self.display = Display()
-            self.joystick = Joystick(callback=self.on_joystick_event)
+            if not self.display.init():
+                self.logger.error("Failed to initialize display")
+                return False
+            
+            # Pass display to joystick for button reading
+            self.joystick = Joystick(disp=self.display, callback=self.on_joystick_event)
+            
             self.gadget = GadgetManager()
             if not self.gadget.init():
                 self.logger.error("Failed to initialize USB gadget - continuing without USB support")
@@ -71,10 +77,6 @@ class ZeroCDApp:
                     self.logger.info("USB gadget bound to UDC")
                 else:
                     self.logger.error("Failed to bind USB gadget to UDC")
-
-        if not self.display.init():
-            self.logger.error("Failed to initialize display")
-            return False
 
         self.display.show_splash()
 
