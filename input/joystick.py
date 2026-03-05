@@ -42,13 +42,13 @@ class Joystick:
         
         if HAS_GPIO:
             try:
-                # Initialize pins like lcd_hat - INPUT with pull_up=True
+                # Initialize pins like lcd_hat - INPUT with pull_up=True, active_state=None
                 # When button is pressed, value becomes 0 (LOW)
-                self.pins['up'] = DigitalInputDevice(JOYSTICK_PINS['up'], pull_up=True, active_state=True)
-                self.pins['down'] = DigitalInputDevice(JOYSTICK_PINS['down'], pull_up=True, active_state=True)
-                self.pins['left'] = DigitalInputDevice(JOYSTICK_PINS['left'], pull_up=True, active_state=True)
-                self.pins['right'] = DigitalInputDevice(JOYSTICK_PINS['right'], pull_up=True, active_state=True)
-                self.pins['press'] = DigitalInputDevice(JOYSTICK_PINS['press'], pull_up=True, active_state=True)
+                self.pins['up'] = DigitalInputDevice(JOYSTICK_PINS['up'], pull_up=True)
+                self.pins['down'] = DigitalInputDevice(JOYSTICK_PINS['down'], pull_up=True)
+                self.pins['left'] = DigitalInputDevice(JOYSTICK_PINS['left'], pull_up=True)
+                self.pins['right'] = DigitalInputDevice(JOYSTICK_PINS['right'], pull_up=True)
+                self.pins['press'] = DigitalInputDevice(JOYSTICK_PINS['press'], pull_up=True)
                 self._available = True
                 self.logger.info("Joystick initialized with gpiozero")
             except Exception as e:

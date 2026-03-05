@@ -223,24 +223,24 @@ class ST7789:
         self.image.paste(color, (0, 0, self.width, self.height))  
         self.draw = ImageDraw.Draw(self.image)  
     
-    def _draw_centered_text(self, y: int, text: str, color=(255, 255, 255), size: int = 1):  
-        """Draw centered text at Y position."""  
-        try:  
-            font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 9 * size)  
-        except:  
-            font = ImageFont.load_default()  
+    def _draw_centered_text(self, y: int, text: str, color=(255, 255, 255), size: int = 1):
+        """Draw centered text at Y position."""
+        try:
+            font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 16 * size)
+        except:
+            font = ImageFont.load_default()
         
         bbox = self.draw.textbbox((0, 0), text, font=font)  
         text_width = bbox[2] - bbox[0]  
         x = (self.width - text_width) // 2  
         self.draw.text((x, y), text, fill=color, font=font)  
     
-    def _draw_text(self, x: int, y: int, text: str, color=(255, 255, 255), size: int = 1):  
-        """Draw text at position."""  
-        try:  
-            font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 9 * size)  
-        except:  
-            font = ImageFont.load_default()  
+    def _draw_text(self, x: int, y: int, text: str, color=(255, 255, 255), size: int = 1):
+        """Draw text at position."""
+        try:
+            font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 16 * size)
+        except:
+            font = ImageFont.load_default()
         self.draw.text((x, y), text, fill=color, font=font)  
     
     def show_splash(self):  
