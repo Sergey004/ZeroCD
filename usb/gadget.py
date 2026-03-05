@@ -36,14 +36,22 @@ class GadgetManager:
     def _get_udc(self) -> Optional[str]:
         """Get available UDC (USB Device Controller)."""
         try:
-            with open('/sys/class/udc/uevent', 'r') as f:
-                for line in f:
-                    if line.startswith('UDC_NAME='):
-                        return line.strip().split('=')[1]
-            # Fallback: list UDC directory
-            udc_list = os.listdir('/sys/class/udc/')
+            # List UDC directory - each subdirectory is a UDC device
+            udc_path = '/sys/class/udc/'
+            if not os.path.exists(udc_path):
+                self.logger.error(f"UDC path not found: {udc_path}")
+                return None
+            
+            udc_list = [d for d in os.listdir(udc_path) 
+                       if os.path.isdir(os.path.join(udc_path, d))]
+            
             if udc_list:
+                self.logger.info(f"Found UDC devices: {udc_list}")
                 return udc_list[0]
+            else:
+                self.logger.error("No UDC devices found in /sys/class/udc/")
+                return None
+                
         except Exception as e:
             self.logger.error(f"Failed to get UDC: {e}")
         return None
