@@ -56,7 +56,7 @@ apt-get install -y -qq \
     git \
     wget \
     curl \
-    fc-cache \
+    fontconfig \
     hostapd \
     dnsmasq \
     iptables \
