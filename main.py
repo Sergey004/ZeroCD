@@ -89,10 +89,14 @@ class ZeroCDApp:
         self.wifi = WiFiManager()
 
         self.logger.info("ZeroCD initialization complete")
-        if self.iso_files:
-    # Загружаем первый образ из списка по умолчанию
-            self.gadget.set_iso(self.iso_files[0])
+        
+        # Загружаем первый образ из списка по умолчанию
+        if self.iso_list:
+            self.on_iso_selected(self.iso_list[0])
+            
         return True
+        
+
 
     def on_iso_selected(self, iso_name: str):
         self.logger.info(f"User selected ISO: {iso_name}")
@@ -103,28 +107,23 @@ class ZeroCDApp:
             self.update_display()
 
     def on_joystick_event(self, direction: Direction):
-        if direction == Direction.PRESS:          # ← центральная кнопка джойстика
-            self.logger.info("Центральная кнопка нажата — обработка QUIT/меню")
-        # сюда вставь то, что раньше было под QUIT
-        # например:
-        # self.running = False
-        # self.gadget.shutdown()
-        # sys.exit(0)
-            return
-
         if direction == Direction.UP:
-            self.menu.prev()
+            if self.menu:
+                self.menu.prev()
         elif direction == Direction.DOWN:
-            self.menu.next()
+            if self.menu:
+                self.menu.next()
         elif direction == Direction.PRESS:
-            self.menu.select()
+            self.logger.info("Центральная кнопка нажата — Выбор образа")
+            if self.menu:
+                self.menu.select()
         elif direction == Direction.RIGHT:
             self.toggle_wifi()
         elif direction == Direction.LEFT:
             self.toggle_mtp()
 
         self.update_display()
-
+        
     def toggle_wifi(self):
         self.logger.info("WiFi toggle requested")
         
