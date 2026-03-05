@@ -1,6 +1,5 @@
 """
 Joystick для Waveshare ST7789 LCD HAT
-Использует disp.digital_read как в key_demo.py
 """
 import threading
 import time
@@ -30,9 +29,9 @@ class Joystick:
         self.last_trigger = {d: 0.0 for d in Direction}
         
         # Verify display has required attributes
-        required_pins = ['GPIO_KEY_UP_PIN', 'GPIO_KEY_DOWN_PIN', 'GPIO_KEY_LEFT_PIN', 
+        required_pins =['GPIO_KEY_UP_PIN', 'GPIO_KEY_DOWN_PIN', 'GPIO_KEY_LEFT_PIN', 
                       'GPIO_KEY_RIGHT_PIN', 'GPIO_KEY_PRESS_PIN']
-        missing = []
+        missing =[]
         for pin in required_pins:
             if not hasattr(self.disp, pin) or getattr(self.disp, pin) is None:
                 missing.append(pin)
@@ -44,14 +43,15 @@ class Joystick:
         self.logger.info("Joystick initialized successfully")
 
     def _is_pressed(self, pin_attr: str) -> bool:
-        """Check if button is pressed (like key_demo.py: != 0 means pressed)"""
+        """Check if button is pressed"""
         try:
             pin = getattr(self.disp, pin_attr)
             if pin is None:
                 return False
             value = self.disp.digital_read(pin)
-            # Like key_demo.py: == 0 is released, != 0 is pressed
-            return value != 0
+            # ИСПРАВЛЕНО: Кнопки подтянуты к VCC (pull-up), 
+            # поэтому 0 означает что кнопка нажата, 1 - отпущена.
+            return value == 0
         except Exception as e:
             self.logger.debug(f"Error reading {pin_attr}: {e}")
             return False
