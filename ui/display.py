@@ -103,6 +103,9 @@ class ST7789:
         self.GPIO_KEY_LEFT_PIN = DigitalInputDevice(JOYSTICK_PINS['left'], pull_up=True)
         self.GPIO_KEY_RIGHT_PIN = DigitalInputDevice(JOYSTICK_PINS['right'], pull_up=True)
         self.GPIO_KEY_PRESS_PIN = DigitalInputDevice(JOYSTICK_PINS['press'], pull_up=True)
+        self.GPIO_KEY1_PIN = DigitalInputDevice(JOYSTICK_PINS['key1'], pull_up=True)
+        self.GPIO_KEY2_PIN = DigitalInputDevice(JOYSTICK_PINS['key2'], pull_up=True)
+        self.GPIO_KEY3_PIN = DigitalInputDevice(JOYSTICK_PINS['key3'], pull_up=True)
 
         return True
     
@@ -359,14 +362,18 @@ class ST7789:
             self.SPI.close()  
             self.SPI = None  
         
-        if self.GPIO_BL_PIN:  
-            self.GPIO_BL_PIN.close()  
-        if self.GPIO_DC_PIN:  
-            self.GPIO_DC_PIN.close()  
-        if self.GPIO_RST_PIN:  
-            self.GPIO_RST_PIN.close()  
-        
-        self.logger.info("Display closed")  
+        # Close joystick pins
+        for pin_attr in ['GPIO_KEY_UP_PIN', 'GPIO_KEY_DOWN_PIN', 'GPIO_KEY_LEFT_PIN', 
+                         'GPIO_KEY_RIGHT_PIN', 'GPIO_KEY_PRESS_PIN', 'GPIO_KEY1_PIN', 
+                         'GPIO_KEY2_PIN', 'GPIO_KEY3_PIN', 'GPIO_BL_PIN', 'GPIO_DC_PIN', 'GPIO_RST_PIN']:
+            try:
+                pin = getattr(self, pin_attr, None)
+                if pin:
+                    pin.close()
+            except:
+                pass
+
+        self.logger.info("Display closed")
   
   
 class Display(ST7789):  

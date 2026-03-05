@@ -1,6 +1,6 @@
 """
 Joystick для Waveshare ST7789 LCD HAT
-Использует disp.digital_read + жёсткий анти-спам
+Использует disp.digital_read как в key_demo.py
 """
 import threading
 import time
@@ -22,56 +22,80 @@ class Direction(Enum):
 class Joystick:
     def __init__(self, disp, callback: Optional[Callable[[Direction], None]] = None):
         self.logger = get_logger("joystick")
-        self.disp = disp                    # ← используем твой disp из ST7789
+        self.disp = disp
         self.callback = callback
         self.running = False
         self._thread = None
         self.last_direction = Direction.NONE
         self.last_trigger = {d: 0.0 for d in Direction}
+        
+        # Verify display has required attributes
+        required_pins = ['GPIO_KEY_UP_PIN', 'GPIO_KEY_DOWN_PIN', 'GPIO_KEY_LEFT_PIN', 
+                      'GPIO_KEY_RIGHT_PIN', 'GPIO_KEY_PRESS_PIN']
+        missing = []
+        for pin in required_pins:
+            if not hasattr(self.disp, pin) or getattr(self.disp, pin) is None:
+                missing.append(pin)
+        
+        if missing:
+            self.logger.error(f"Missing joystick pins in display: {missing}")
+            raise RuntimeError(f"Display missing joystick pins: {missing}")
+        
+        self.logger.info("Joystick initialized successfully")
 
     def _is_pressed(self, pin_attr: str) -> bool:
-        """Читаем кнопку через disp (точно как в key_demo.py)"""
+        """Check if button is pressed (like key_demo.py: != 0 means pressed)"""
         try:
-            return getattr(self.disp, pin_attr) and self.disp.digital_read(getattr(self.disp, pin_attr)) == 0
-        except:
+            pin = getattr(self.disp, pin_attr)
+            if pin is None:
+                return False
+            value = self.disp.digital_read(pin)
+            # Like key_demo.py: == 0 is released, != 0 is pressed
+            return value != 0
+        except Exception as e:
+            self.logger.debug(f"Error reading {pin_attr}: {e}")
             return False
 
     def _get_direction(self) -> Direction:
         if self._is_pressed('GPIO_KEY_PRESS_PIN'): return Direction.PRESS
-        if self._is_pressed('GPIO_KEY_UP_PIN'):    return Direction.UP
-        if self._is_pressed('GPIO_KEY_DOWN_PIN'):  return Direction.DOWN
-        if self._is_pressed('GPIO_KEY_LEFT_PIN'):  return Direction.LEFT
+        if self._is_pressed('GPIO_KEY_UP_PIN'): return Direction.UP
+        if self._is_pressed('GPIO_KEY_DOWN_PIN'): return Direction.DOWN
+        if self._is_pressed('GPIO_KEY_LEFT_PIN'): return Direction.LEFT
         if self._is_pressed('GPIO_KEY_RIGHT_PIN'): return Direction.RIGHT
         return Direction.NONE
 
     def _poll_loop(self):
-        self.logger.info("Joystick polling started (анти-спам версия)")
+        self.logger.info("Joystick polling started")
         
         while self.running:
             direction = self._get_direction()
             now = time.time()
-
-            # Только при новом нажатии + cooldown
+            
+            # Only trigger on new press with cooldown
             if direction != Direction.NONE:
-                cooldown = 0.55 if direction == Direction.PRESS else 0.25   # PRESS — почти не спамит
+                cooldown = 0.3 if direction == Direction.PRESS else 0.15
                 
                 if direction != self.last_direction or (now - self.last_trigger[direction] > cooldown):
-                    self.logger.info(f"Button triggered: {direction.value}")
+                    self.logger.debug(f"Button triggered: {direction.value}")
                     if self.callback:
                         self.callback(direction)
                     self.last_trigger[direction] = now
-
+            
             self.last_direction = direction
-            time.sleep(0.025)  # 40 опросов/сек — плавно и без нагрузки
+            time.sleep(1.0 / JOYSTICK_POLL_RATE)
 
-    def start_polling(self, callback: Callable[[Direction], None]):
-        self.callback = callback
+    def start_polling(self, callback: Callable[[Direction], None] = None):
+        """Start background polling with callback."""
+        if callback:
+            self.callback = callback
         self.running = True
         self._thread = threading.Thread(target=self._poll_loop, daemon=True)
         self._thread.start()
+        self.logger.info("Joystick polling thread started")
 
     def stop(self):
+        """Stop polling."""
         self.running = False
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=1)
-        self.logger.info("Joystick released")
+        if self._thread:
+            self._thread.join(timeout=1.0)
+        self.logger.info("Joystick stopped")

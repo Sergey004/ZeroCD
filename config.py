@@ -21,6 +21,9 @@ JOYSTICK_PINS = {
     'left': 5,
     'right': 26,
     'press': 13,
+    'key1': 21,  # Additional buttons on HAT
+    'key2': 20,
+    'key3': 16,
 }
 
 # Display dimensions
