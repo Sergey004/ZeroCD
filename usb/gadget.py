@@ -112,7 +112,6 @@ class GadgetManager:
         except:
             pass
 
-        # ИСПРАВЛЕНО: Правильный порядок удаления configfs и сетевых гаджетов
         # Remove config symlinks and config
         config_path = f"{gadget_path}/configs/{self.config_name}"
         if os.path.exists(config_path):
@@ -217,7 +216,10 @@ class GadgetManager:
             lun_path = f'{ms_path}/lun.0'
             os.makedirs(lun_path, exist_ok=True)
             time.sleep(0.2)
+            
+            # ИСПРАВЛЕНО: Добавлен ro=1. Без него ядро не дает примонтировать ISO!
             self._write_file(f'{lun_path}/removable', '1')
+            self._write_file(f'{lun_path}/ro', '1')     
             self._write_file(f'{lun_path}/cdrom', '1')
             self._write_file(f'{lun_path}/nofua', '0')
             os.symlink(ms_path, f'{config_path}/mass_storage.usb0')
@@ -304,7 +306,6 @@ class GadgetManager:
             if os.path.exists(udc_file):
                 with open(udc_file, 'r') as f:
                     if f.read().strip():
-                        # ИСПРАВЛЕНО: для сброса UDC используется '\n', пустая строка не работает в configfs
                         self._write_file(udc_file, '\n')
                         time.sleep(0.5)
             self.state = GadgetState.UNBOUND
@@ -337,26 +338,18 @@ class GadgetManager:
             pass
         
         try:
-            # Unbind current
-            was_bound = (self.state == GadgetState.ACTIVE)
-            if was_bound:
-                self.logger.info("Unbinding gadget for ISO switch...")
-                self.unbind()
-                time.sleep(0.5)  # Wait for unbind to complete
-            
-            # Set new ISO file in lun.0
             lun_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.0/file'
             
-            # Clear current file first
-            self.logger.info("Clearing current ISO...")
-            # ИСПРАВЛЕНО: для выброса ISO используется '\n'
+            # ИСПРАВЛЕНО: Полный unbind/bind больше не нужен!
+            # Эмулируем извлечение диска
+            self.logger.info("Ejecting current ISO...")
             self._write_file(lun_file, '\n')
-            time.sleep(0.1)
+            time.sleep(0.8) # Даем ОС время понять, что дисковод открылся
             
-            # Set new file
-            self.logger.info(f"Setting new ISO: {iso_path}")
+            # Эмулируем вставку нового диска
+            self.logger.info(f"Inserting new ISO: {iso_path}")
             self._write_file(lun_file, iso_path)
-            time.sleep(0.1)
+            time.sleep(0.5) # Даем ОС время на чтение нового диска
             
             # Verify file was set
             with open(lun_file, 'r') as f:
@@ -365,12 +358,6 @@ class GadgetManager:
                     self.logger.error(f"ISO path not set correctly. Got: {set_path}")
                     return False
                 self.logger.info(f"ISO verified: {set_path}")
-            
-            # Rebind if was active
-            if was_bound:
-                self.logger.info("Rebinding gadget...")
-                self.bind()
-                time.sleep(0.5)  # Wait for host to recognize
             
             self.current_iso = iso_path
             self.logger.info(f"ISO switched successfully to: {iso_path}")
