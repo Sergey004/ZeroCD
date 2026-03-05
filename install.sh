@@ -85,6 +85,7 @@ fi
 log_info "Installing ZeroCD files..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cp -r "$SCRIPT_DIR"/* "$ZEROCD_DIR/" 2>/dev/null || true
+mkdir -p /mnt/iso_storage
 
 # Install Font Awesome
 log_info "Installing Font Awesome..."

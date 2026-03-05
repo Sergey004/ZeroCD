@@ -5,7 +5,7 @@ import gpiod
 import threading
 import time
 from enum import Enum
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional, Tuple, Dict
 from config import JOYSTICK_PINS, JOYSTICK_POLL_RATE
 from system.logger import get_logger
 
@@ -30,9 +30,17 @@ class Joystick:
 
     def __init__(self, callback: Optional[Callable[[Direction], None]] = None):
         self.logger = get_logger("joystick")
-        self.chip = gpiod.Chip('gpiochip0')
+        self.chip = None
         self.lines = {}
-        self._setup_lines()
+        self._available = False
+        try:
+            self.chip = gpiod.Chip('gpiochip0')
+            self._setup_lines()
+            self._available = True
+        except FileNotFoundError:
+            self.logger.warning("GPIO chip not found (gpiochip0). Joystick input unavailable.")
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize GPIO: {e}")
         self.last_state = Direction.NONE
         self.callback = callback
         self.running = False
@@ -57,6 +65,8 @@ class Joystick:
 
     def _get_direction(self) -> Direction:
         """Determine current joystick direction."""
+        if not self._available:
+            return Direction.NONE
         if self._read_pin('press'):
             return Direction.PRESS
         if self._read_pin('up'):
@@ -123,5 +133,6 @@ class Joystick:
 
         for line in self.lines.values():
             line.release()
-        self.chip.close()
+        if self.chip:
+            self.chip.close()
         self.logger.info("Joystick released")
