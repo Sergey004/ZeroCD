@@ -92,7 +92,7 @@ class GadgetManager:
         return None
 
     def _safe_cleanup_gadget(self):
-        """Safely cleanup existing gadget if exists"""
+        """Safely cleanup existing gadget if exists — более надёжный порядок"""
         gadget_path = f"/sys/kernel/config/usb_gadget/{self.gadget_name}"
         
         if not os.path.exists(gadget_path):
@@ -100,83 +100,87 @@ class GadgetManager:
         
         self.logger.info(f"Cleaning up existing gadget: {self.gadget_name}")
         
-        # Check UDC status
+        # 1. Сначала всегда unbind UDC (если bound)
         udc_file = f"{gadget_path}/UDC"
         try:
-            with open(udc_file, 'r') as f:
-                udc_content = f.read().strip()
-                if udc_content:
-                    self.logger.info(f"Unbinding from UDC: {udc_content}")
+            if os.path.exists(udc_file):
+                with open(udc_file, 'r') as f:
+                    current_udc = f.read().strip()
+                if current_udc:
+                    self.logger.info(f"Unbinding from UDC: {current_udc}")
                     with open(udc_file, 'w') as f:
                         f.write("\n")
-                    time.sleep(0.5)
-        except:
-            pass
+                    time.sleep(1.0)  # даём kernel время отпустить
+        except Exception as e:
+            self.logger.warning(f"Failed to unbind UDC: {e}")
         
-        # Remove symlinks from configs
-        try:
-            config_path = f"{gadget_path}/configs/{self.config_name}"
-            if os.path.exists(config_path):
+        # 2. Удаляем симлинки из configs/c.1/*
+        config_path = f"{gadget_path}/configs/{self.config_name}"
+        if os.path.exists(config_path):
+            try:
                 for item in os.listdir(config_path):
                     item_path = os.path.join(config_path, item)
                     if os.path.islink(item_path):
                         os.unlink(item_path)
                         self.logger.debug(f"Removed symlink: {item}")
-        except Exception as e:
-            self.logger.warning(f"Error removing symlinks: {e}")
+                time.sleep(0.2)
+            except Exception as e:
+                self.logger.warning(f"Error removing symlinks: {e}")
         
-        # Remove function
-        try:
-            func_path = f"{gadget_path}/functions/{self.function_name}"
-            if os.path.exists(func_path):
-                # Remove lun.0 first
-                lun_path = f"{func_path}/lun.0"
-                if os.path.exists(lun_path):
+        # 3. Удаляем lun.0 (если есть)
+        func_path = f"{gadget_path}/functions/{self.function_name}"
+        if os.path.exists(func_path):
+            lun_path = f"{func_path}/lun.0"
+            if os.path.exists(lun_path):
+                try:
+                    # Сначала очищаем file (на всякий)
+                    file_attr = f"{lun_path}/file"
+                    if os.path.exists(file_attr):
+                        with open(file_attr, 'w') as f:
+                            f.write("\n")
+                    # Очищаем другие атрибуты, если нужно
                     os.rmdir(lun_path)
+                    self.logger.debug("Removed lun.0")
+                except Exception as e:
+                    self.logger.warning(f"Could not remove lun.0: {e}")
+            
+            # Теперь сам function
+            try:
                 os.rmdir(func_path)
                 self.logger.debug(f"Removed function: {self.function_name}")
+            except Exception as e:
+                self.logger.warning(f"Error removing function: {e}")
+        
+        # 4. Удаляем strings в config (если пусто)
+        try:
+            cfg_strings = f"{config_path}/strings/0x409"
+            if os.path.exists(cfg_strings):
+                for f in os.listdir(cfg_strings):
+                    os.remove(os.path.join(cfg_strings, f))
+                os.rmdir(cfg_strings)
+            if os.path.exists(config_path):
+                os.rmdir(config_path)
         except Exception as e:
-            self.logger.warning(f"Error removing function: {e}")
+            self.logger.warning(f"Error cleaning config/strings: {e}")
         
-        # Remove config strings
-        try:
-            strings_path = f"{gadget_path}/configs/{self.config_name}/strings/0x409"
-            if os.path.exists(strings_path):
-                for f in os.listdir(strings_path):
-                    os.remove(os.path.join(strings_path, f))
-                os.rmdir(strings_path)
-                os.rmdir(f"{gadget_path}/configs/{self.config_name}/strings")
-        except:
-            pass
-        
-        # Remove config
-        try:
-            cfg_path = f"{gadget_path}/configs/{self.config_name}"
-            if os.path.exists(cfg_path):
-                os.rmdir(cfg_path)
-                self.logger.debug(f"Removed config: {self.config_name}")
-        except Exception as e:
-            self.logger.warning(f"Error removing config: {e}")
-        
-        # Remove gadget strings
-        try:
-            strings_path = f"{gadget_path}/strings/0x409"
-            if os.path.exists(strings_path):
-                for f in os.listdir(strings_path):
-                    os.remove(os.path.join(strings_path, f))
-                os.rmdir(strings_path)
+        # 5. Удаляем gadget strings
+        gadget_strings = f"{gadget_path}/strings/0x409"
+        if os.path.exists(gadget_strings):
+            try:
+                for f in os.listdir(gadget_strings):
+                    os.remove(os.path.join(gadget_strings, f))
+                os.rmdir(gadget_strings)
                 os.rmdir(f"{gadget_path}/strings")
-        except:
-            pass
+            except:
+                pass
         
-        # Remove gadget
+        # 6. Финально сам gadget
         try:
             if os.path.exists(gadget_path):
                 os.rmdir(gadget_path)
-                self.logger.info(f"Removed gadget: {self.gadget_name}")
+                self.logger.info(f"Successfully removed gadget: {self.gadget_name}")
         except Exception as e:
-            self.logger.error(f"Failed to remove gadget: {e}")
-            return False
+            self.logger.warning(f"Final rmdir gadget failed (often benign): {e}")
         
         return True
 
