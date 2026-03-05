@@ -201,7 +201,7 @@ class GadgetManager:
             os.makedirs(gadget_path, exist_ok=True)
             
             # Set USB device descriptors
-            self._write_file(f'{gadget_path}/idVendor', '0x1d6b') # Linux Foundation
+            self._write_file(f'{gadget_path}/idVendor', '0x1d6b')  # Linux Foundation
             self._write_file(f'{gadget_path}/idProduct', '0x0104') # Multifunction Composite Gadget
             self._write_file(f'{gadget_path}/bcdDevice', '0x0100')
             self._write_file(f'{gadget_path}/bcdUSB', '0x0200')
@@ -218,29 +218,38 @@ class GadgetManager:
             os.makedirs(f'{config_path}/strings/0x409', exist_ok=True)
             self._write_file(f'{config_path}/strings/0x409/configuration', 'CD-ROM')
             
-            # Create mass storage function with lun.0
+            # Mass storage function
             func_path = f'{gadget_path}/functions/{self.function_name}'
             os.makedirs(func_path, exist_ok=True)
             
-            # Set mass storage parameters at function level
+            # stall можно оставить — полезно для отлова багов
             self._write_file(f'{func_path}/stall', '1')
-            self._write_file(f'{func_path}/nofua', '0')
+            # nofua на уровне function обычно не пишется или игнорируется — убираем
             
-            # Create lun.0 and set CD-ROM specific parameters
+            # lun.0 — создаём и сразу настраиваем
             lun_path = f'{func_path}/lun.0'
             os.makedirs(lun_path, exist_ok=True)
+            time.sleep(0.1)  # маленький sleep — иногда sysfs тормозит
+            
             self._write_file(f'{lun_path}/removable', '1')
             self._write_file(f'{lun_path}/cdrom', '1')
-            self._write_file(f'{lun_path}/nofua', '0')
+            self._write_file(f'{lun_path}/nofua', '0')   # теперь ок
+            
+            # Опционально: read-only для чистого CD-ROM поведения
+            # self._write_file(f'{lun_path}/ro', '1')
             
             # Link function to config
-            os.symlink(func_path, f'{config_path}/{self.function_name}')
+            link_path = f'{config_path}/{self.function_name}'
+            if not os.path.exists(link_path):
+                os.symlink(func_path, link_path)
             
             self.logger.info("Gadget structure created successfully")
             return True
             
         except Exception as e:
             self.logger.error(f"Failed to create gadget structure: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             return False
 
     def init(self) -> bool:
