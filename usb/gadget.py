@@ -315,49 +315,49 @@ class GadgetManager:
             return False
 
     def set_iso(self, iso_path: str) -> bool:
-        """Switch active ISO image."""
+        """Switch active ISO image with full USB reconnect."""
         self.logger.info(f"Setting ISO: {iso_path}")
         
         if not os.path.exists(iso_path):
             self.logger.error(f"ISO not found: {iso_path}")
             return False
         
-        # Check file is readable
         if not os.access(iso_path, os.R_OK):
             self.logger.error(f"ISO not readable: {iso_path}")
             return False
         
-        # Get absolute path
         iso_path = os.path.abspath(iso_path)
         
-        # Get file size for logging
         try:
-            size_mb = os.path.getsize(iso_path) / (1024 * 1024)
-            self.logger.info(f"ISO size: {size_mb:.1f} MB")
-        except:
-            pass
-        
-        try:
+            # 1. Запоминаем, был ли включен USB-гаджет
+            was_bound = (self.state == GadgetState.ACTIVE)
+            
+            # 2. Программно "отключаем" USB от компьютера
+            if was_bound:
+                self.logger.info("Unbinding USB for ISO switch...")
+                self.unbind()
+                time.sleep(1.5)  # Ждем, чтобы Windows точно заметила отключение
+            
+            # 3. Меняем файл диска
             lun_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.0/file'
             
-            # ИСПРАВЛЕНО: Полный unbind/bind больше не нужен!
-            # Эмулируем извлечение диска
-            self.logger.info("Ejecting current ISO...")
-            self._write_file(lun_file, '\n')
-            time.sleep(0.8) # Даем ОС время понять, что дисковод открылся
-            
-            # Эмулируем вставку нового диска
             self.logger.info(f"Inserting new ISO: {iso_path}")
+            # Просто перезаписываем путь к файлу. При unbind он вставится без проблем.
             self._write_file(lun_file, iso_path)
-            time.sleep(0.5) # Даем ОС время на чтение нового диска
+            time.sleep(0.5)
             
-            # Verify file was set
+            # Проверяем, применился ли файл
             with open(lun_file, 'r') as f:
                 set_path = f.read().strip()
                 if set_path != iso_path:
                     self.logger.error(f"ISO path not set correctly. Got: {set_path}")
                     return False
-                self.logger.info(f"ISO verified: {set_path}")
+            
+            # 4. Программно "подключаем" USB обратно к компьютеру
+            if was_bound:
+                self.logger.info("Rebinding USB...")
+                self.bind()
+                time.sleep(1.0)
             
             self.current_iso = iso_path
             self.logger.info(f"ISO switched successfully to: {iso_path}")

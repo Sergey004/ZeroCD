@@ -77,8 +77,10 @@ class ZeroCDApp:
                     self.logger.info("USB gadget bound to UDC")
                 else:
                     self.logger.error("Failed to bind USB gadget to UDC")
+                    
 
         self.display.show_splash()
+       
 
         self.menu = Menu(self.iso_list, self.on_iso_selected)
         if self.iso_list:
@@ -87,6 +89,9 @@ class ZeroCDApp:
         self.wifi = WiFiManager()
 
         self.logger.info("ZeroCD initialization complete")
+        if self.iso_files:
+    # Загружаем первый образ из списка по умолчанию
+            self.gadget.set_iso(self.iso_files[0])
         return True
 
     def on_iso_selected(self, iso_name: str):
