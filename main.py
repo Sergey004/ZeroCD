@@ -62,7 +62,15 @@ class ZeroCDApp:
             self.display = Display()
             self.joystick = Joystick(self.on_joystick_event)
             self.gadget = GadgetManager()
-            self.gadget.init()
+            if not self.gadget.init():
+                self.logger.error("Failed to initialize USB gadget - continuing without USB support")
+            else:
+                self.logger.info("USB gadget initialized, binding to UDC...")
+                if self.gadget.bind():
+                    self.usb_connected = True
+                    self.logger.info("USB gadget bound to UDC")
+                else:
+                    self.logger.error("Failed to bind USB gadget to UDC")
 
         if not self.display.init():
             self.logger.error("Failed to initialize display")
@@ -116,18 +124,9 @@ class ZeroCDApp:
                 self.logger.info("Wi-Fi enabled")
 
     def toggle_mtp(self):
-        if not self.gadget:
-            return
-
-        if self.mtp_enabled:
-            if self.gadget.stop_mtp():
-                self.mtp_enabled = False
-                self.logger.info("MTP disabled")
-        else:
-            if self.gadget.start_mtp():
-                self.mtp_enabled = True
-                self.logger.info("MTP enabled")
-        self.update_display()
+        # MTP not implemented yet
+        self.logger.info("MTP not implemented")
+        pass
 
     def update_display(self):
         if self.display:
@@ -152,10 +151,13 @@ class ZeroCDApp:
             else:
                 self.joystick.start_polling(self.on_joystick_event)
         else:
-            self.gadget.bind()
-            self.usb_connected = True
+            # Gadget already bound in init(), start joystick polling if available
+            if hasattr(self.joystick, '_available') and self.joystick._available:
+                self.joystick.start_polling(self.on_joystick_event)
+            else:
+                self.logger.warning("Joystick not available, USB CD-ROM mode only")
 
-            self.update_display()
+        self.update_display()
 
         if USE_PC_EMULATION:
             self._run_pc_loop()
@@ -199,7 +201,7 @@ def main():
         if app:
             app.logger.info(f"Received signal {signum}")
             app.shutdown()
-        sys.exit(0)
+            sys.exit(0)
 
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
