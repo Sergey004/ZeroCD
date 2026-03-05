@@ -1,13 +1,19 @@
 """
 Joystick input handler for 5-way navigation switch
+Uses gpiozero like lcd_hat
 """
-import gpiod
 import threading
 import time
 from enum import Enum
-from typing import Callable, Optional, Tuple, Dict
+from typing import Callable, Optional
 from config import JOYSTICK_PINS, JOYSTICK_POLL_RATE
 from system.logger import get_logger
+
+try:
+    from gpiozero import DigitalInputDevice
+    HAS_GPIO = True
+except ImportError:
+    HAS_GPIO = False
 
 
 class Direction(Enum):
@@ -23,6 +29,7 @@ class Direction(Enum):
 class Joystick:
     """
     Handles 5-way joystick input with debouncing.
+    Uses gpiozero like lcd_hat - buttons are active LOW with pull-up.
     """
 
     DEBOUNCE_MS = 50
@@ -30,43 +37,44 @@ class Joystick:
 
     def __init__(self, callback: Optional[Callable[[Direction], None]] = None):
         self.logger = get_logger("joystick")
-        self.chip = None
-        self.lines = {}
         self._available = False
-        try:
-            self.chip = gpiod.Chip('gpiochip0')
-            self._setup_lines()
-            self._available = True
-        except FileNotFoundError:
-            self.logger.warning("GPIO chip not found (gpiochip0). Joystick input unavailable.")
-        except Exception as e:
-            self.logger.warning(f"Failed to initialize GPIO: {e}")
+        self.pins = {}
+        
+        if HAS_GPIO:
+            try:
+                # Initialize pins like lcd_hat - INPUT with pull_up=True
+                # When button is pressed, value becomes 0 (LOW)
+                self.pins['up'] = DigitalInputDevice(JOYSTICK_PINS['up'], pull_up=True, active_state=True)
+                self.pins['down'] = DigitalInputDevice(JOYSTICK_PINS['down'], pull_up=True, active_state=True)
+                self.pins['left'] = DigitalInputDevice(JOYSTICK_PINS['left'], pull_up=True, active_state=True)
+                self.pins['right'] = DigitalInputDevice(JOYSTICK_PINS['right'], pull_up=True, active_state=True)
+                self.pins['press'] = DigitalInputDevice(JOYSTICK_PINS['press'], pull_up=True, active_state=True)
+                self._available = True
+                self.logger.info("Joystick initialized with gpiozero")
+            except Exception as e:
+                self.logger.warning(f"Failed to initialize joystick GPIO: {e}")
+        else:
+            self.logger.warning("gpiozero not available. Joystick input disabled.")
+        
         self.last_state = Direction.NONE
         self.callback = callback
         self.running = False
-        self._thread: Optional[threading.Thread] = None
-
-    def _setup_lines(self):
-        """Initialize GPIO lines for joystick."""
-        for name, pin in JOYSTICK_PINS.items():
-            line = self.chip.get_line(pin)
-            line.request(
-                consumer="zerocd-joystick",
-                type=gpiod.LINE_REQ_EV_BOTH_EDGES
-            )
-            self.lines[name] = line
+        self._thread = None
 
     def _read_pin(self, name: str) -> bool:
-        """Read current state of a pin (active LOW)."""
-        line = self.lines.get(name)
-        if line:
-            return line.get_value() == 0
+        """Read current state of a pin.
+        Returns True if button is pressed (value == 0 due to pull-up).
+        """
+        pin = self.pins.get(name)
+        if pin:
+            return pin.value == 0  # Active LOW with pull-up
         return False
 
     def _get_direction(self) -> Direction:
         """Determine current joystick direction."""
         if not self._available:
             return Direction.NONE
+            
         if self._read_pin('press'):
             return Direction.PRESS
         if self._read_pin('up'):
@@ -96,7 +104,7 @@ class Joystick:
 
         return Direction.NONE
 
-    def read_event(self) -> Tuple[Direction, float]:
+    def read_event(self):
         """Read next joystick event with timestamp."""
         direction = self.get_direction()
         return direction, time.time()
@@ -110,7 +118,7 @@ class Joystick:
 
     def _poll_loop(self):
         """Background polling loop."""
-        last_directions: Dict[Direction, float] = {d: 0 for d in Direction}
+        last_directions = {d: 0 for d in Direction}
         debounce_time = 0.1
 
         while self.running:
@@ -131,8 +139,12 @@ class Joystick:
         if self._thread:
             self._thread.join(timeout=1)
 
-        for line in self.lines.values():
-            line.release()
-        if self.chip:
-            self.chip.close()
+        # Close all pin devices
+        for pin in self.pins.values():
+            try:
+                pin.close()
+            except:
+                pass
+        self.pins.clear()
+        
         self.logger.info("Joystick released")
