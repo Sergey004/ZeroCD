@@ -195,6 +195,18 @@ class GadgetManager:
             self._write_file(f'{gadget_path}/bcdDevice', '0x0100')
             self._write_file(f'{gadget_path}/bcdUSB', '0x0200')
             
+            # --- ИСПРАВЛЕНИЕ ДЛЯ WINDOWS (Побеждаем Ошибку 10) ---
+            # Говорим Windows, что мы композитное устройство (IAD - Interface Association Descriptor)
+            self._write_file(f'{gadget_path}/bDeviceClass', '0xEF')
+            self._write_file(f'{gadget_path}/bDeviceSubClass', '0x02')
+            self._write_file(f'{gadget_path}/bDeviceProtocol', '0x01')
+            
+            # Включаем Microsoft OS Descriptors
+            self._write_file(f'{gadget_path}/os_desc/use', '1')
+            self._write_file(f'{gadget_path}/os_desc/b_vendor_code', '0xcd')
+            self._write_file(f'{gadget_path}/os_desc/qw_sign', 'MSFT100')
+            # -----------------------------------------------------
+            
             # Strings
             os.makedirs(f'{gadget_path}/strings/0x409', exist_ok=True)
             self._write_file(f'{gadget_path}/strings/0x409/manufacturer', 'ZeroCD')
@@ -216,8 +228,6 @@ class GadgetManager:
             lun_path = f'{ms_path}/lun.0'
             os.makedirs(lun_path, exist_ok=True)
             time.sleep(0.2)
-            
-            # ИСПРАВЛЕНО: Добавлен ro=1. Без него ядро не дает примонтировать ISO!
             self._write_file(f'{lun_path}/removable', '1')
             self._write_file(f'{lun_path}/ro', '1')     
             self._write_file(f'{lun_path}/cdrom', '1')
@@ -229,14 +239,27 @@ class GadgetManager:
             os.makedirs(rndis_path, exist_ok=True)
             self._write_file(f'{rndis_path}/host_addr', '02:00:00:00:00:01')
             self._write_file(f'{rndis_path}/dev_addr', '02:00:00:00:00:02')
+            
+            # --- Указываем Windows правильный драйвер автоматически ---
+            rndis_os_desc = f'{rndis_path}/os_desc/interface.rndis'
+            if os.path.exists(rndis_os_desc):
+                self._write_file(f'{rndis_os_desc}/compatible_id', 'RNDIS')
+                self._write_file(f'{rndis_os_desc}/sub_compatible_id', '5162001')
+            # ----------------------------------------------------------
             os.symlink(rndis_path, f'{config_path}/rndis.usb0')
             
-            # Ethernet ECM (Mac/Linux)
+            # Ethernet ECM (Mac/Linux) - Оставляем как запасной вариант для других ОС
             ecm_path = f'{gadget_path}/functions/ecm.usb0'
             os.makedirs(ecm_path, exist_ok=True)
             self._write_file(f'{ecm_path}/host_addr', '02:00:00:00:00:03')
             self._write_file(f'{ecm_path}/dev_addr', '02:00:00:00:00:04')
             os.symlink(ecm_path, f'{config_path}/ecm.usb0')
+            
+            # Привязываем конфиг к дескрипторам Windows
+            try:
+                os.symlink(config_path, f'{gadget_path}/os_desc/c.1')
+            except FileExistsError:
+                pass
             
             self.logger.info("Gadget (CD + LAN) created")
             return True
