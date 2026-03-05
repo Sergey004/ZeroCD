@@ -299,33 +299,64 @@ class GadgetManager:
             self.logger.error(f"ISO not found: {iso_path}")
             return False
         
+        # Check file is readable
+        if not os.access(iso_path, os.R_OK):
+            self.logger.error(f"ISO not readable: {iso_path}")
+            return False
+        
+        # Get absolute path
         iso_path = os.path.abspath(iso_path)
+        
+        # Get file size for logging
+        try:
+            size_mb = os.path.getsize(iso_path) / (1024 * 1024)
+            self.logger.info(f"ISO size: {size_mb:.1f} MB")
+        except:
+            pass
         
         try:
             # Unbind current
             was_bound = (self.state == GadgetState.ACTIVE)
             if was_bound:
+                self.logger.info("Unbinding gadget for ISO switch...")
                 self.unbind()
+                time.sleep(0.5)  # Wait for unbind to complete
             
             # Set new ISO file in lun.0
             lun_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.0/file'
             
-            # Clear current file
+            # Clear current file first
+            self.logger.info("Clearing current ISO...")
             self._write_file(lun_file, '')
+            time.sleep(0.1)
             
             # Set new file
+            self.logger.info(f"Setting new ISO: {iso_path}")
             self._write_file(lun_file, iso_path)
+            time.sleep(0.1)
+            
+            # Verify file was set
+            with open(lun_file, 'r') as f:
+                set_path = f.read().strip()
+                if set_path != iso_path:
+                    self.logger.error(f"ISO path not set correctly. Got: {set_path}")
+                    return False
+                self.logger.info(f"ISO verified: {set_path}")
             
             # Rebind if was active
             if was_bound:
+                self.logger.info("Rebinding gadget...")
                 self.bind()
+                time.sleep(0.5)  # Wait for host to recognize
             
             self.current_iso = iso_path
-            self.logger.info(f"ISO switched to: {iso_path}")
+            self.logger.info(f"ISO switched successfully to: {iso_path}")
             return True
             
         except Exception as e:
             self.logger.error(f"Failed to set ISO: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             return False
 
     def shutdown(self):
