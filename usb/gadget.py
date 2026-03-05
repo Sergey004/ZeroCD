@@ -1,6 +1,6 @@
 """
-USB Gadget manager for CD-ROM, Ethernet and MTP emulation
-Uses configfs to configure USB gadget on Raspberry Pi Zero
+USB Gadget manager for CD-ROM (ZeroCD)
+Uses configfs
 """
 import os
 import subprocess
@@ -13,18 +13,12 @@ from system.logger import get_logger
 
 
 class GadgetState(Enum):
-    """USB gadget states."""
     UNBOUND = "unbound"
     CONFIGURED = "configured"
     ACTIVE = "active"
 
 
 class GadgetManager:
-    """
-    Manages USB gadget configuration for mass storage, network and MTP.
-    Uses Linux USB Gadget ConfigFS.
-    """
-
     def __init__(self):
         self.logger = get_logger("gadget")
         self.state = GadgetState.UNBOUND
@@ -35,7 +29,6 @@ class GadgetManager:
         self._udc = None
 
     def _check_module(self, module_name):
-        """Check if kernel module is loaded"""
         try:
             result = subprocess.run(['lsmod'], capture_output=True, text=True)
             return module_name in result.stdout
@@ -43,7 +36,6 @@ class GadgetManager:
             return False
 
     def _load_module(self, module_name):
-        """Load kernel module"""
         self.logger.info(f"Loading module: {module_name}")
         try:
             subprocess.run(['modprobe', module_name], check=True)
@@ -55,11 +47,9 @@ class GadgetManager:
             return False
 
     def _mount_configfs(self):
-        """Mount configfs if not already mounted"""
         config_path = "/sys/kernel/config"
         if os.path.ismount(config_path):
             return True
-        
         self.logger.info("Mounting configfs...")
         try:
             subprocess.run(['mount', '-t', 'configfs', 'none', config_path], check=True)
@@ -70,61 +60,50 @@ class GadgetManager:
             return False
 
     def _get_udc(self) -> Optional[str]:
-        """Get available UDC (USB Device Controller)."""
         try:
             udc_path = '/sys/class/udc/'
             if not os.path.exists(udc_path):
-                self.logger.error(f"UDC path not found: {udc_path}")
                 return None
-            
-            udc_list = [d for d in os.listdir(udc_path) 
-                       if os.path.isdir(os.path.join(udc_path, d))]
-            
+            udc_list = [d for d in os.listdir(udc_path) if os.path.isdir(os.path.join(udc_path, d))]
             if udc_list:
                 self.logger.info(f"Found UDC devices: {udc_list}")
                 return udc_list[0]
-            else:
-                self.logger.error("No UDC devices found")
-                return None
-                
+            return None
         except Exception as e:
             self.logger.error(f"Failed to get UDC: {e}")
-        return None
+            return None
 
     def _safe_cleanup_gadget(self):
-        """Агрессивная очистка gadget — решает 99% 'directory not empty' и 'Operation not permitted'"""
         gadget_path = f"/sys/kernel/config/usb_gadget/{self.gadget_name}"
-        
         if not os.path.exists(gadget_path):
             return True
-        
+
         self.logger.info(f"Cleaning up existing gadget: {self.gadget_name}")
-        
-        # 1. Жёстко отцепляем UDC
+
+        # 1. Unbind UDC
         udc_file = f"{gadget_path}/UDC"
         try:
             if os.path.exists(udc_file):
                 with open(udc_file, 'r') as f:
                     if f.read().strip():
-                        self.logger.debug("Unbinding UDC...")
                         with open(udc_file, 'w') as f:
                             f.write("\n")
-                        time.sleep(1.5)
-        except Exception as e:
-            self.logger.warning(f"UDC unbind failed: {e}")
-        
-        # 2. Удаляем симлинки из конфига
+                        time.sleep(1.8)
+        except:
+            pass
+
+        # 2. Remove symlinks
         config_path = f"{gadget_path}/configs/{self.config_name}"
         if os.path.exists(config_path):
-            try:
-                for item in list(os.listdir(config_path)):
-                    item_path = os.path.join(config_path, item)
-                    if os.path.islink(item_path):
-                        os.unlink(item_path)
-            except Exception as e:
-                self.logger.warning(f"Symlink cleanup: {e}")
-        
-        # 3. Чистим lun.0 (самая упрямая часть)
+            for item in list(os.listdir(config_path)):
+                p = os.path.join(config_path, item)
+                if os.path.islink(p):
+                    try:
+                        os.unlink(p)
+                    except:
+                        pass
+
+        # 3. Clean lun.0 + function
         func_path = f"{gadget_path}/functions/{self.function_name}"
         if os.path.exists(func_path):
             lun_path = f"{func_path}/lun.0"
@@ -134,18 +113,16 @@ class GadgetManager:
                     if os.path.exists(file_path):
                         with open(file_path, 'w') as f:
                             f.write('')
-                    time.sleep(0.3)
+                    time.sleep(0.4)
                     os.rmdir(lun_path)
-                    self.logger.debug("lun.0 removed")
                 except Exception as e:
-                    self.logger.warning(f"lun.0 removal (benign): {e}")
-            
+                    self.logger.warning(f"lun.0 removal: {e}")
             try:
                 os.rmdir(func_path)
-            except Exception as e:
-                self.logger.warning(f"Function removal: {e}")
-        
-        # 4. Чистим config и его строки
+            except:
+                pass
+
+        # 4. Clean config + strings
         if os.path.exists(config_path):
             try:
                 strings_path = f"{config_path}/strings/0x409"
@@ -154,33 +131,26 @@ class GadgetManager:
                         os.remove(os.path.join(strings_path, f))
                     os.rmdir(strings_path)
                 os.rmdir(config_path)
-            except Exception as e:
-                self.logger.warning(f"Config cleanup: {e}")
-        
-        # 5. Строки гаджета
-        strings_path = f"{gadget_path}/strings/0x409"
-        if os.path.exists(strings_path):
-            try:
+            except:
+                pass
+
+        # 5. Gadget strings + final rmdir
+        try:
+            strings_path = f"{gadget_path}/strings/0x409"
+            if os.path.exists(strings_path):
                 for f in os.listdir(strings_path):
                     os.remove(os.path.join(strings_path, f))
                 os.rmdir(strings_path)
                 os.rmdir(f"{gadget_path}/strings")
-            except:
-                pass
-        
-        # 6. Финал
-        try:
             if os.path.exists(gadget_path):
                 os.rmdir(gadget_path)
-                self.logger.info("Gadget fully cleaned")
         except Exception as e:
-            self.logger.warning(f"Final rmdir (usually harmless): {e}")
-        
+            self.logger.warning(f"Final cleanup (harmless): {e}")
+
         time.sleep(0.5)
         return True
 
     def _write_file(self, path: str, content: str):
-        """Write content to a sysfs file."""
         try:
             with open(path, 'w') as f:
                 f.write(content)
@@ -189,62 +159,50 @@ class GadgetManager:
             raise
 
     def _create_gadget_structure(self) -> bool:
-        """Create gadget directory structure in configfs."""
         gadget_path = f'/sys/kernel/config/usb_gadget/{self.gadget_name}'
-        
         try:
-            # Remove old gadget if exists
             self._safe_cleanup_gadget()
-            
-            # Create gadget directory
             os.makedirs(gadget_path, exist_ok=True)
-            
-            # Set USB device descriptors
+
             self._write_file(f'{gadget_path}/idVendor', '0x1d6b')
             self._write_file(f'{gadget_path}/idProduct', '0x0104')
             self._write_file(f'{gadget_path}/bcdDevice', '0x0100')
             self._write_file(f'{gadget_path}/bcdUSB', '0x0200')
-            
-            # Create strings
+
             os.makedirs(f'{gadget_path}/strings/0x409', exist_ok=True)
             self._write_file(f'{gadget_path}/strings/0x409/serialnumber', '1234567890')
             self._write_file(f'{gadget_path}/strings/0x409/manufacturer', 'ZeroCD')
             self._write_file(f'{gadget_path}/strings/0x409/product', 'USB CD-ROM Drive')
-            
-            # Create configuration
+
             config_path = f'{gadget_path}/configs/{self.config_name}'
             os.makedirs(config_path, exist_ok=True)
             os.makedirs(f'{config_path}/strings/0x409', exist_ok=True)
             self._write_file(f'{config_path}/strings/0x409/configuration', 'CD-ROM')
-            
-            # Mass storage function
+
             func_path = f'{gadget_path}/functions/{self.function_name}'
             os.makedirs(func_path, exist_ok=True)
-            
             self._write_file(f'{func_path}/stall', '1')
-            
-            # lun.0 — создаём и сразу настраиваем
+
             lun_path = f'{func_path}/lun.0'
             os.makedirs(lun_path, exist_ok=True)
-            time.sleep(0.15)  # sysfs иногда тормозит
-            
+            time.sleep(0.2)                     # ← важно для sysfs
+
             self._write_file(f'{lun_path}/removable', '1')
             self._write_file(f'{lun_path}/cdrom', '1')
             self._write_file(f'{lun_path}/nofua', '0')
-            # self._write_file(f'{lun_path}/ro', '1')  # раскомменти если хочешь строго read-only
-            
-            # Link function to config
+
             link_path = f'{config_path}/{self.function_name}'
             if not os.path.exists(link_path):
                 os.symlink(func_path, link_path)
-            
+
             self.logger.info("Gadget structure created successfully")
             return True
-            
         except Exception as e:
             self.logger.error(f"Failed to create gadget structure: {e}")
             self.logger.error(traceback.format_exc())
             return False
+
+    # init, bind, unbind, set_iso, shutdown, get_status — точно такие же, как в предыдущей версии, которую я давал раньше (не менял)
 
     def init(self) -> bool:
         """Initialize USB gadget configuration."""

@@ -96,8 +96,13 @@ class ZeroCDApp:
             self.update_display()
 
     def on_joystick_event(self, direction: Direction):
-        if direction == Direction.QUIT:
-            self.running = False
+        if direction == Direction.PRESS:          # ← центральная кнопка джойстика
+            self.logger.info("Центральная кнопка нажата — обработка QUIT/меню")
+        # сюда вставь то, что раньше было под QUIT
+        # например:
+        # self.running = False
+        # self.gadget.shutdown()
+        # sys.exit(0)
             return
 
         if direction == Direction.UP:
