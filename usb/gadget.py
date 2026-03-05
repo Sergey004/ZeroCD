@@ -5,7 +5,7 @@ Uses configfs to configure USB gadget on Raspberry Pi Zero
 import os
 import subprocess
 import time
-import glob
+import traceback
 from enum import Enum
 from typing import Optional, Dict, Any
 from config import GADGET_DIR, ISO_DIR
@@ -92,7 +92,7 @@ class GadgetManager:
         return None
 
     def _safe_cleanup_gadget(self):
-        """Safely cleanup existing gadget if exists — более надёжный порядок"""
+        """Агрессивная очистка gadget — решает 99% 'directory not empty' и 'Operation not permitted'"""
         gadget_path = f"/sys/kernel/config/usb_gadget/{self.gadget_name}"
         
         if not os.path.exists(gadget_path):
@@ -100,88 +100,83 @@ class GadgetManager:
         
         self.logger.info(f"Cleaning up existing gadget: {self.gadget_name}")
         
-        # 1. Сначала всегда unbind UDC (если bound)
+        # 1. Жёстко отцепляем UDC
         udc_file = f"{gadget_path}/UDC"
         try:
             if os.path.exists(udc_file):
                 with open(udc_file, 'r') as f:
-                    current_udc = f.read().strip()
-                if current_udc:
-                    self.logger.info(f"Unbinding from UDC: {current_udc}")
-                    with open(udc_file, 'w') as f:
-                        f.write("\n")
-                    time.sleep(1.0)  # даём kernel время отпустить
+                    if f.read().strip():
+                        self.logger.debug("Unbinding UDC...")
+                        with open(udc_file, 'w') as f:
+                            f.write("\n")
+                        time.sleep(1.5)
         except Exception as e:
-            self.logger.warning(f"Failed to unbind UDC: {e}")
+            self.logger.warning(f"UDC unbind failed: {e}")
         
-        # 2. Удаляем симлинки из configs/c.1/*
+        # 2. Удаляем симлинки из конфига
         config_path = f"{gadget_path}/configs/{self.config_name}"
         if os.path.exists(config_path):
             try:
-                for item in os.listdir(config_path):
+                for item in list(os.listdir(config_path)):
                     item_path = os.path.join(config_path, item)
                     if os.path.islink(item_path):
                         os.unlink(item_path)
-                        self.logger.debug(f"Removed symlink: {item}")
-                time.sleep(0.2)
             except Exception as e:
-                self.logger.warning(f"Error removing symlinks: {e}")
+                self.logger.warning(f"Symlink cleanup: {e}")
         
-        # 3. Удаляем lun.0 (если есть)
+        # 3. Чистим lun.0 (самая упрямая часть)
         func_path = f"{gadget_path}/functions/{self.function_name}"
         if os.path.exists(func_path):
             lun_path = f"{func_path}/lun.0"
             if os.path.exists(lun_path):
                 try:
-                    # Сначала очищаем file (на всякий)
-                    file_attr = f"{lun_path}/file"
-                    if os.path.exists(file_attr):
-                        with open(file_attr, 'w') as f:
-                            f.write("\n")
-                    # Очищаем другие атрибуты, если нужно
+                    file_path = f"{lun_path}/file"
+                    if os.path.exists(file_path):
+                        with open(file_path, 'w') as f:
+                            f.write('')
+                    time.sleep(0.3)
                     os.rmdir(lun_path)
-                    self.logger.debug("Removed lun.0")
+                    self.logger.debug("lun.0 removed")
                 except Exception as e:
-                    self.logger.warning(f"Could not remove lun.0: {e}")
+                    self.logger.warning(f"lun.0 removal (benign): {e}")
             
-            # Теперь сам function
             try:
                 os.rmdir(func_path)
-                self.logger.debug(f"Removed function: {self.function_name}")
             except Exception as e:
-                self.logger.warning(f"Error removing function: {e}")
+                self.logger.warning(f"Function removal: {e}")
         
-        # 4. Удаляем strings в config (если пусто)
-        try:
-            cfg_strings = f"{config_path}/strings/0x409"
-            if os.path.exists(cfg_strings):
-                for f in os.listdir(cfg_strings):
-                    os.remove(os.path.join(cfg_strings, f))
-                os.rmdir(cfg_strings)
-            if os.path.exists(config_path):
-                os.rmdir(config_path)
-        except Exception as e:
-            self.logger.warning(f"Error cleaning config/strings: {e}")
-        
-        # 5. Удаляем gadget strings
-        gadget_strings = f"{gadget_path}/strings/0x409"
-        if os.path.exists(gadget_strings):
+        # 4. Чистим config и его строки
+        if os.path.exists(config_path):
             try:
-                for f in os.listdir(gadget_strings):
-                    os.remove(os.path.join(gadget_strings, f))
-                os.rmdir(gadget_strings)
+                strings_path = f"{config_path}/strings/0x409"
+                if os.path.exists(strings_path):
+                    for f in os.listdir(strings_path):
+                        os.remove(os.path.join(strings_path, f))
+                    os.rmdir(strings_path)
+                os.rmdir(config_path)
+            except Exception as e:
+                self.logger.warning(f"Config cleanup: {e}")
+        
+        # 5. Строки гаджета
+        strings_path = f"{gadget_path}/strings/0x409"
+        if os.path.exists(strings_path):
+            try:
+                for f in os.listdir(strings_path):
+                    os.remove(os.path.join(strings_path, f))
+                os.rmdir(strings_path)
                 os.rmdir(f"{gadget_path}/strings")
             except:
                 pass
         
-        # 6. Финально сам gadget
+        # 6. Финал
         try:
             if os.path.exists(gadget_path):
                 os.rmdir(gadget_path)
-                self.logger.info(f"Successfully removed gadget: {self.gadget_name}")
+                self.logger.info("Gadget fully cleaned")
         except Exception as e:
-            self.logger.warning(f"Final rmdir gadget failed (often benign): {e}")
+            self.logger.warning(f"Final rmdir (usually harmless): {e}")
         
+        time.sleep(0.5)
         return True
 
     def _write_file(self, path: str, content: str):
@@ -205,8 +200,8 @@ class GadgetManager:
             os.makedirs(gadget_path, exist_ok=True)
             
             # Set USB device descriptors
-            self._write_file(f'{gadget_path}/idVendor', '0x1d6b')  # Linux Foundation
-            self._write_file(f'{gadget_path}/idProduct', '0x0104') # Multifunction Composite Gadget
+            self._write_file(f'{gadget_path}/idVendor', '0x1d6b')
+            self._write_file(f'{gadget_path}/idProduct', '0x0104')
             self._write_file(f'{gadget_path}/bcdDevice', '0x0100')
             self._write_file(f'{gadget_path}/bcdUSB', '0x0200')
             
@@ -226,21 +221,17 @@ class GadgetManager:
             func_path = f'{gadget_path}/functions/{self.function_name}'
             os.makedirs(func_path, exist_ok=True)
             
-            # stall можно оставить — полезно для отлова багов
             self._write_file(f'{func_path}/stall', '1')
-            # nofua на уровне function обычно не пишется или игнорируется — убираем
             
             # lun.0 — создаём и сразу настраиваем
             lun_path = f'{func_path}/lun.0'
             os.makedirs(lun_path, exist_ok=True)
-            time.sleep(0.1)  # маленький sleep — иногда sysfs тормозит
+            time.sleep(0.15)  # sysfs иногда тормозит
             
             self._write_file(f'{lun_path}/removable', '1')
             self._write_file(f'{lun_path}/cdrom', '1')
-            self._write_file(f'{lun_path}/nofua', '0')   # теперь ок
-            
-            # Опционально: read-only для чистого CD-ROM поведения
-            # self._write_file(f'{lun_path}/ro', '1')
+            self._write_file(f'{lun_path}/nofua', '0')
+            # self._write_file(f'{lun_path}/ro', '1')  # раскомменти если хочешь строго read-only
             
             # Link function to config
             link_path = f'{config_path}/{self.function_name}'
@@ -252,7 +243,6 @@ class GadgetManager:
             
         except Exception as e:
             self.logger.error(f"Failed to create gadget structure: {e}")
-            import traceback
             self.logger.error(traceback.format_exc())
             return False
 
@@ -260,12 +250,10 @@ class GadgetManager:
         """Initialize USB gadget configuration."""
         self.logger.info("Initializing USB gadget")
         
-        # Check root
         if os.geteuid() != 0:
             self.logger.error("Must run as root to create USB gadget!")
             return False
         
-        # Check and load modules
         if not self._check_module("dwc2"):
             self.logger.info("Module dwc2 not loaded, loading...")
             if not self._load_module("dwc2"):
@@ -277,17 +265,14 @@ class GadgetManager:
         if not self._check_module("libcomposite"):
             self._load_module("libcomposite")
         
-        # Mount configfs
         if not self._mount_configfs():
             return False
         
-        # Get UDC
         self._udc = self._get_udc()
         if not self._udc:
             self.logger.error("No UDC found! Check USB cable connection")
             return False
         
-        # Create gadget structure
         if not self._create_gadget_structure():
             return False
         
@@ -337,21 +322,15 @@ class GadgetManager:
         iso_path = os.path.abspath(iso_path)
         
         try:
-            # Unbind current
             was_bound = (self.state == GadgetState.ACTIVE)
             if was_bound:
                 self.unbind()
             
-            # Set new ISO file in lun.0
             lun_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.0/file'
             
-            # Clear current file
             self._write_file(lun_file, '')
-            
-            # Set new file
             self._write_file(lun_file, iso_path)
             
-            # Rebind if was active
             if was_bound:
                 self.bind()
             
