@@ -60,8 +60,7 @@ class ZeroCDApp:
             self.gadget = GadgetManagerPC()
         else:
             self.display = Display()
-            self.joystick = Joystick(disp=disp, callback=self.on_joystick_event)  # ← передаём disp!
-            self.joystick.start_polling(self.on_joystick_event)
+            self.joystick = Joystick(callback=self.on_joystick_event)
             self.gadget = GadgetManager()
             if not self.gadget.init():
                 self.logger.error("Failed to initialize USB gadget - continuing without USB support")
