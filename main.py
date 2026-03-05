@@ -8,6 +8,7 @@ PC Mode: Set ZEROCD_PLATFORM=pc to run with curses TUI
 import signal
 import sys
 import os
+import subprocess
 
 from config import ISO_DIR, USE_PC_EMULATION, TEST_ISO_DIR
 from system.logger import setup_logger, get_logger
@@ -123,7 +124,7 @@ class ZeroCDApp:
             self.toggle_mtp()
 
         self.update_display()
-        
+
     def toggle_wifi(self):
         self.logger.info("WiFi toggle requested")
         
@@ -156,9 +157,60 @@ class ZeroCDApp:
             self.logger.error(f"Error toggling WiFi: {e}")
 
     def toggle_mtp(self):
-        # MTP not implemented yet
-        self.logger.info("MTP not implemented")
-        pass
+        self.logger.info("MTP toggle requested")
+        
+        # Укажите здесь точное имя или путь к вашему C++ файлу! 
+        # (Например: "umtprd" или "/opt/mtp/mtp_server")
+        MTP_COMMAND = "uMTP-Responder/umtprd" 
+        
+        if not self.mtp_enabled:
+            self.logger.info("Switching to MTP mode...")
+            
+            # 1. Полностью отключаем наш CD/LAN гаджет, чтобы освободить USB-порт
+            if self.gadget:
+                self.gadget.shutdown()
+                self.usb_connected = False
+            
+            # 2. Запускаем C++ программу MTP в фоновом режиме
+            try:
+                self.mtp_process = subprocess.Popen(["sudo", MTP_COMMAND]) 
+                self.mtp_enabled = True
+                self.logger.info(f"MTP started successfully ({MTP_COMMAND})")
+            except Exception as e:
+                self.logger.error(f"Failed to start MTP: {e}")
+                self.mtp_enabled = False
+                
+        else:
+            self.logger.info("Stopping MTP mode and restoring CD-ROM...")
+            
+            # 1. Убиваем C++ программу
+            if hasattr(self, 'mtp_process') and self.mtp_process:
+                self.mtp_process.terminate()
+                try:
+                    self.mtp_process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    self.mtp_process.kill()
+            
+            # На всякий случай добиваем процесс через pkill
+            subprocess.run(["sudo", "pkill", "-9", MTP_COMMAND], capture_output=True)
+            self.mtp_enabled = False
+            
+            # Очищаем возможные остатки конфигов от C++ программы
+            subprocess.run(["sudo", "umount", "-l", "/sys/kernel/config/usb_gadget/mtp"], capture_output=True)
+            
+            # 2. Заново инициализируем наш CD-ROM гаджет
+            if self.gadget:
+                if self.gadget.init():
+                    if self.gadget.bind():
+                        self.usb_connected = True
+                    
+                    # 3. Возвращаем активный образ обратно в привод
+                    if self.active_iso:
+                        iso_path = self.iso_manager.get_iso_path(self.active_iso)
+                        if iso_path:
+                            self.gadget.set_iso(iso_path)
+                            
+            self.logger.info("CD-ROM mode restored")
 
     def update_display(self):
         if self.display:
