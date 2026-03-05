@@ -5,7 +5,6 @@ Uses configfs to configure USB gadget on Raspberry Pi Zero
 import os
 import subprocess
 import time
-import glob
 import traceback
 from enum import Enum
 from typing import Optional, Dict, Any
@@ -78,7 +77,7 @@ class GadgetManager:
                 self.logger.error(f"UDC path not found: {udc_path}")
                 return None
             
-            udc_list = [d for d in os.listdir(udc_path) 
+            udc_list =[d for d in os.listdir(udc_path) 
                        if os.path.isdir(os.path.join(udc_path, d))]
             
             if udc_list:
@@ -112,32 +111,54 @@ class GadgetManager:
                         time.sleep(1.5)
         except:
             pass
-        
-        # Remove functions
-        functions_path = f"{gadget_path}/functions"
-        if os.path.exists(functions_path):
-            for item in list(os.listdir(functions_path)):
-                try:
-                    fp = f"{functions_path}/{item}"
-                    if os.path.isdir(fp) and 'lun.0' in os.listdir(fp):
-                        with open(f"{fp}/lun.0/file", 'w') as f:
-                            f.write('')
-                        os.rmdir(fp)
-                except:
-                    pass
-        
-        # Remove config
+
+        # ИСПРАВЛЕНО: Правильный порядок удаления configfs и сетевых гаджетов
+        # Remove config symlinks and config
         config_path = f"{gadget_path}/configs/{self.config_name}"
         if os.path.exists(config_path):
             try:
+                # Remove symlinks
+                for item in os.listdir(config_path):
+                    item_path = os.path.join(config_path, item)
+                    if os.path.islink(item_path):
+                        os.unlink(item_path)
+                
+                # Remove config strings
+                strings_path = f"{config_path}/strings/0x409"
+                if os.path.exists(strings_path):
+                    os.rmdir(strings_path)
+                
                 os.rmdir(config_path)
+            except Exception as e:
+                self.logger.error(f"Failed to remove config: {e}")
+
+        # Remove functions
+        functions_path = f"{gadget_path}/functions"
+        if os.path.exists(functions_path):
+            for item in os.listdir(functions_path):
+                fp = f"{functions_path}/{item}"
+                try:
+                    if os.path.isdir(fp):
+                        if 'mass_storage' in item and 'lun.0' in os.listdir(fp):
+                            with open(f"{fp}/lun.0/file", 'w') as f:
+                                f.write('\n')
+                        os.rmdir(fp)
+                except Exception as e:
+                    self.logger.error(f"Failed to remove function {item}: {e}")
+        
+        # Remove gadget strings
+        gadget_strings = f"{gadget_path}/strings/0x409"
+        if os.path.exists(gadget_strings):
+            try:
+                os.rmdir(gadget_strings)
             except:
                 pass
-        
+
         # Remove gadget
         try:
             os.rmdir(gadget_path)
-        except:
+        except Exception as e:
+            self.logger.error(f"Failed to remove gadget dir: {e}")
             pass
         
         time.sleep(0.5)
@@ -283,7 +304,8 @@ class GadgetManager:
             if os.path.exists(udc_file):
                 with open(udc_file, 'r') as f:
                     if f.read().strip():
-                        self._write_file(udc_file, '')
+                        # ИСПРАВЛЕНО: для сброса UDC используется '\n', пустая строка не работает в configfs
+                        self._write_file(udc_file, '\n')
                         time.sleep(0.5)
             self.state = GadgetState.UNBOUND
             return True
@@ -327,7 +349,8 @@ class GadgetManager:
             
             # Clear current file first
             self.logger.info("Clearing current ISO...")
-            self._write_file(lun_file, '')
+            # ИСПРАВЛЕНО: для выброса ISO используется '\n'
+            self._write_file(lun_file, '\n')
             time.sleep(0.1)
             
             # Set new file
