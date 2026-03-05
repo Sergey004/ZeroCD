@@ -70,9 +70,9 @@ class WiFiManager:
         self.ap_ssid = ""
         self.ap_password = ""
         self.has_wifi = False
-        self._check_wifi硬件()
+        self._check_wifi()
 
-    def _check_wifi硬件(self):
+    def _check_wifi(self):
         """Check if WiFi hardware is available."""
         try:
             result = subprocess.run(

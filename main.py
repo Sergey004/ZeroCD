@@ -121,14 +121,35 @@ class ZeroCDApp:
         self.update_display()
 
     def toggle_wifi(self):
-        if self.wifi_enabled:
-            self.wifi.disable()
-            self.wifi_enabled = False
-            self.logger.info("Wi-Fi disabled")
-        else:
-            if self.wifi.enable():
-                self.wifi_enabled = True
-                self.logger.info("Wi-Fi enabled")
+        self.logger.info("WiFi toggle requested")
+        
+        # Защита от отсутствия железа Wi-Fi
+        if not hasattr(self, 'wifi') or not self.wifi.has_wifi_support():
+            self.logger.warning("No WiFi hardware available to toggle.")
+            return
+
+        try:
+            # Импортируем состояния, чтобы знать текущий статус
+            from net.wifi import WiFiState
+            
+            current_state = self.wifi.get_status()
+            
+            if current_state == WiFiState.CONNECTED:
+                self.logger.info("WiFi is connected. Disconnecting...")
+                self.wifi.disconnect()
+            elif current_state in (WiFiState.OFF, WiFiState.ERROR):
+                self.logger.info("WiFi is disconnected. Connecting...")
+                self.wifi.connect()
+            elif current_state == WiFiState.AP_MODE:
+                self.logger.info("WiFi is in AP mode. Stopping AP and connecting to network...")
+                # Если у вас логика выключения портала через captive, можно добавить сюда остановку captive
+                self.wifi.stop_ap_mode()
+                self.wifi.connect()
+            else:
+                self.logger.info(f"WiFi is currently {current_state.value}. Please wait.")
+                
+        except Exception as e:
+            self.logger.error(f"Error toggling WiFi: {e}")
 
     def toggle_mtp(self):
         # MTP not implemented yet

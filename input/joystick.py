@@ -78,7 +78,12 @@ class Joystick:
                 if direction != self.last_direction or (now - self.last_trigger[direction] > cooldown):
                     self.logger.debug(f"Button triggered: {direction.value}")
                     if self.callback:
-                        self.callback(direction)
+                        try:
+                            self.callback(direction)
+                        except Exception as e:
+                            self.logger.error(f"Error in joystick callback: {e}")
+                            import traceback
+                            self.logger.error(traceback.format_exc())
                     self.last_trigger[direction] = now
             
             self.last_direction = direction
