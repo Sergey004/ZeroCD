@@ -54,7 +54,7 @@ WEBUI_HOST = "0.0.0.0"
 WEBUI_SECRET_KEY = os.environ.get("ZEROCD_SECRET_KEY", str(uuid.uuid4()))
 
 # ZeroCD data directory
-ZEROCD_DATA_DIR = "/root/zerocd"
+ZEROCD_DATA_DIR = "/opt/zerocd"
 WIFI_NETWORKS_FILE = os.path.join(ZEROCD_DATA_DIR, "wifi_networks.json")
 WEBUI_AUTH_FILE = os.path.join(ZEROCD_DATA_DIR, "webui_auth.json")
 WEBUI_SESSION_SECRET = os.path.join(ZEROCD_DATA_DIR, ".webui_session_secret")
