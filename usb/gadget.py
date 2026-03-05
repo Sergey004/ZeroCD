@@ -1,12 +1,13 @@
 """
 USB Gadget manager for CD-ROM, Ethernet and MTP emulation
+Uses configfs to configure USB gadget on Raspberry Pi Zero
 """
 import os
 import subprocess
-import signal
+import time
 from enum import Enum
-from typing import Optional, Dict, Any, List
-from config import GADGET_DIR, GADGET_UDC, ISO_DIR
+from typing import Optional, Dict, Any
+from config import GADGET_DIR, ISO_DIR
 from system.logger import get_logger
 
 
@@ -20,193 +21,202 @@ class GadgetState(Enum):
 class GadgetManager:
     """
     Manages USB gadget configuration for mass storage, network and MTP.
-
-    Gadget structure:
-    - mass_storage.0: CD-ROM emulation with ISO files
-    - rndis.usb0: RNDIS Ethernet
-    - ecm.usb0: CDC ECM Ethernet
-    - ffs.mtp: MTP via FunctionFS
+    Uses Linux USB Gadget ConfigFS.
     """
 
     def __init__(self):
         self.logger = get_logger("gadget")
         self.state = GadgetState.UNBOUND
         self.current_iso: Optional[str] = None
-        self.udc_path = GADGET_UDC
-        self.mtp_process: Optional[subprocess.Popen] = None
-        self.mtp_enabled = False
+        self.gadget_name = "zerocd"
+        self.config_name = "c.1"
+        self.function_name = "mass_storage.usb0"
+        self._udc = None
+
+    def _get_udc(self) -> Optional[str]:
+        """Get available UDC (USB Device Controller)."""
+        try:
+            with open('/sys/class/udc/uevent', 'r') as f:
+                for line in f:
+                    if line.startswith('UDC_NAME='):
+                        return line.strip().split('=')[1]
+            # Fallback: list UDC directory
+            udc_list = os.listdir('/sys/class/udc/')
+            if udc_list:
+                return udc_list[0]
+        except Exception as e:
+            self.logger.error(f"Failed to get UDC: {e}")
+        return None
 
     def init(self) -> bool:
         """Initialize USB gadget configuration."""
         self.logger.info("Initializing USB gadget")
-        self._create_gadget_structure()
+        
+        # Check if configfs is mounted
+        if not os.path.ismount('/sys/kernel/config'):
+            self.logger.info("Mounting configfs")
+            subprocess.run(['mount', '-t', 'configfs', 'none', '/sys/kernel/config'], check=False)
+        
+        # Get UDC
+        self._udc = self._get_udc()
+        if not self._udc:
+            self.logger.error("No UDC found! Make sure dwc2 module is loaded")
+            return False
+        
+        self.logger.info(f"Using UDC: {self._udc}")
+        
+        # Create gadget structure
+        if not self._create_gadget_structure():
+            return False
+        
+        self.state = GadgetState.CONFIGURED
         return True
 
-    def _create_gadget_structure(self):
+    def _create_gadget_structure(self) -> bool:
         """Create gadget directory structure in configfs."""
-        pass
+        try:
+            # Unbind if already active
+            self._unbind_gadget()
+            
+            # Remove old gadget
+            gadget_path = f'/sys/kernel/config/usb_gadget/{self.gadget_name}'
+            if os.path.exists(gadget_path):
+                self.logger.info("Removing old gadget configuration")
+                subprocess.run(['rm', '-rf', gadget_path], check=False)
+            
+            # Create gadget directory
+            os.makedirs(gadget_path, exist_ok=True)
+            
+            # Set USB device descriptors
+            self._write_file(f'{gadget_path}/idVendor', '0x1d6b')  # Linux Foundation
+            self._write_file(f'{gadget_path}/idProduct', '0x0104')  # Multifunction Composite Gadget
+            self._write_file(f'{gadget_path}/bcdDevice', '0x0100')
+            self._write_file(f'{gadget_path}/bcdUSB', '0x0200')
+            
+            # Create strings
+            os.makedirs(f'{gadget_path}/strings/0x409', exist_ok=True)
+            self._write_file(f'{gadget_path}/strings/0x409/serialnumber', '1234567890')
+            self._write_file(f'{gadget_path}/strings/0x409/manufacturer', 'ZeroCD')
+            self._write_file(f'{gadget_path}/strings/0x409/product', 'USB CD-ROM Drive')
+            
+            # Create configuration
+            config_path = f'{gadget_path}/configs/{self.config_name}'
+            os.makedirs(config_path, exist_ok=True)
+            os.makedirs(f'{config_path}/strings/0x409', exist_ok=True)
+            self._write_file(f'{config_path}/strings/0x409/configuration', 'CD-ROM')
+            
+            # Create mass storage function
+            func_path = f'{gadget_path}/functions/{self.function_name}'
+            os.makedirs(func_path, exist_ok=True)
+            
+            # Set mass storage parameters
+            self._write_file(f'{func_path}/stall', '1')
+            self._write_file(f'{func_path}/removable', '1')
+            self._write_file(f'{func_path}/nofua', '0')
+            
+            # Link function to config
+            os.symlink(func_path, f'{config_path}/{self.function_name}')
+            
+            self.logger.info("Gadget structure created successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to create gadget structure: {e}")
+            return False
+
+    def _write_file(self, path: str, content: str):
+        """Write content to a sysfs file."""
+        try:
+            with open(path, 'w') as f:
+                f.write(content)
+        except Exception as e:
+            self.logger.error(f"Failed to write to {path}: {e}")
+            raise
+
+    def _unbind_gadget(self):
+        """Unbind gadget from UDC if active."""
+        udc_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/UDC'
+        if os.path.exists(udc_file):
+            try:
+                with open(udc_file, 'r') as f:
+                    if f.read().strip():
+                        self._write_file(udc_file, '')
+                        time.sleep(0.5)
+                        self.logger.info("Gadget unbound")
+            except Exception as e:
+                self.logger.warning(f"Error unbinding gadget: {e}")
 
     def bind(self) -> bool:
-        """Bind gadget to UDC (USB Device Controller)."""
-        self.logger.info("Binding USB gadget to UDC")
-        self.state = GadgetState.ACTIVE
-        return True
+        """Bind gadget to UDC."""
+        if not self._udc:
+            self.logger.error("No UDC available")
+            return False
+        
+        try:
+            udc_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/UDC'
+            self._write_file(udc_file, self._udc)
+            self.state = GadgetState.ACTIVE
+            self.logger.info(f"Gadget bound to UDC: {self._udc}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to bind gadget: {e}")
+            return False
 
     def unbind(self) -> bool:
         """Unbind gadget from UDC."""
-        self.logger.info("Unbinding USB gadget from UDC")
-        self.state = GadgetState.UNBOUND
-        return True
+        try:
+            self._unbind_gadget()
+            self.state = GadgetState.UNBOUND
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to unbind gadget: {e}")
+            return False
 
     def set_iso(self, iso_path: str) -> bool:
-        """
-        Switch active ISO image.
-
-        Algorithm:
-        1. Unbind from UDC
-        2. Change lun.0/file to new ISO
-        3. Rebind to UDC
-        """
-        self.logger.info(f"Switching ISO to: {iso_path}")
-
+        """Switch active ISO image."""
+        self.logger.info(f"Setting ISO: {iso_path}")
+        
         if not os.path.exists(iso_path):
-            self.logger.error(f"ISO file not found: {iso_path}")
+            self.logger.error(f"ISO not found: {iso_path}")
+            return False
+        
+        # Get absolute path
+        iso_path = os.path.abspath(iso_path)
+        
+        try:
+            # Unbind current
+            self.unbind()
+            
+            # Set new ISO file
+            lun_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.0/file'
+            
+            # Clear current file
+            self._write_file(lun_file, '')
+            
+            # Set new file
+            self._write_file(lun_file, iso_path)
+            
+            # Rebind
+            self.bind()
+            
+            self.current_iso = iso_path
+            self.logger.info(f"ISO switched to: {iso_path}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to set ISO: {e}")
             return False
 
-        if not iso_path.endswith('.iso'):
-            self.logger.error(f"Invalid file extension: {iso_path}")
-            return False
-
-        if os.path.getsize(iso_path) == 0:
-            self.logger.error(f"ISO file is empty: {iso_path}")
-            return False
-
+    def shutdown(self):
+        """Clean up gadget."""
+        self.logger.info("Shutting down gadget")
         self.unbind()
-        self._set_lun_file(iso_path)
-        self.bind()
-
-        self.current_iso = iso_path
-        return True
-
-    def _set_lun_file(self, path: str):
-        """Set lun.0/file attribute."""
-        pass
 
     def get_status(self) -> Dict[str, Any]:
         """Get current gadget status."""
         return {
             'state': self.state.value,
             'current_iso': self.current_iso,
-            'functions': ['mass_storage', 'rndis', 'ecm', 'mtp'],
+            'udc': self._udc,
+            'functions': ['mass_storage']
         }
-
-    def get_functions(self) -> Dict[str, bool]:
-        """Get enabled USB functions."""
-        return {
-            'mass_storage': True,
-            'rndis': True,
-            'ecm': True,
-            'mtp': self.mtp_enabled,
-        }
-
-    def enable_function(self, name: str) -> bool:
-        """Enable a USB function."""
-        if name == 'mtp':
-            return self.start_mtp()
-        return True
-
-    def disable_function(self, name: str) -> bool:
-        """Disable a USB function."""
-        if name == 'mtp':
-            return self.stop_mtp()
-        return True
-
-    def shutdown(self):
-        """Graceful shutdown of USB gadget."""
-        self.logger.info("Shutting down USB gadget")
-        self.unbind()
-        self._cleanup()
-        self.state = GadgetState.UNBOUND
-
-    def _cleanup(self):
-        """Remove gadget configuration."""
-        if self.mtp_enabled:
-            self.stop_mtp()
-
-    def start_mtp(self, iso_dir: str = ISO_DIR) -> bool:
-        """Start MTP responder via FunctionFS."""
-        if self.mtp_enabled:
-            self.logger.info("MTP already running")
-            return True
-
-        self.logger.info("Starting MTP responder")
-
-        script_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            "scripts", "setup_mtp.sh"
-        )
-
-        if not os.path.exists(script_path):
-            self.logger.error(f"MTP setup script not found: {script_path}")
-            return False
-
-        try:
-            result = subprocess.run(
-                ["sudo", "bash", script_path],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-
-            if result.returncode != 0:
-                self.logger.error(f"MTP setup failed: {result.stderr}")
-                return False
-
-            self.mtp_enabled = True
-            self.logger.info("MTP responder started successfully")
-            return True
-
-        except subprocess.TimeoutExpired:
-            self.logger.error("MTP setup timed out")
-            return False
-        except Exception as e:
-            self.logger.error(f"Failed to start MTP: {e}")
-            return False
-
-    def stop_mtp(self) -> bool:
-        """Stop MTP responder."""
-        if not self.mtp_enabled:
-            return True
-
-        self.logger.info("Stopping MTP responder")
-
-        try:
-            subprocess.run(["pkill", "-9", "umtprd"], capture_output=True)
-            subprocess.run(["sudo", "umount", "/dev/ffs-mtp"], capture_output=True)
-
-            self.mtp_enabled = False
-            self.mtp_process = None
-            self.logger.info("MTP responder stopped")
-            return True
-
-        except Exception as e:
-            self.logger.error(f"Failed to stop MTP: {e}")
-            return False
-
-    def get_mtp_status(self) -> Dict[str, Any]:
-        """Get MTP responder status."""
-        return {
-            'enabled': self.mtp_enabled,
-            'running': self.mtp_process is not None if self.mtp_process else False,
-        }
-
-    def set_functions(self, functions: List[str]) -> bool:
-        """Set enabled USB functions."""
-        self.logger.info(f"Setting USB functions: {functions}")
-
-        if 'mtp' in functions and not self.mtp_enabled:
-            return self.start_mtp()
-        elif 'mtp' not in functions and self.mtp_enabled:
-            return self.stop_mtp()
-
-        return True
