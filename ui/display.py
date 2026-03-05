@@ -267,8 +267,11 @@ class ST7789:
         self.draw.rectangle((0, 0, 240, 24), fill=ST7789_COLORS['CYAN'])  
         self._draw_text(5, 6, " ZeroCD ", ST7789_COLORS['BLACK'])  
         
-        status = f"Wi-Fi:{'ON' if wifi_on else 'OFF'} MTP:{'ON' if mtp_on else 'OFF'}"  
-        self._draw_text(240 - len(status) * 9 - 5, 6, status, ST7789_COLORS['WHITE'])  
+        status = f"Wi-Fi:{'ON' if wifi_on else 'OFF'} MTP:{'ON' if mtp_on else 'OFF'}"
+        # Calculate position based on estimated text width (16px * 0.6 for character width)
+        char_width = 10  # estimated average char width for 16px font
+        text_width = len(status) * char_width
+        self._draw_text(240 - text_width - 5, 6, status, ST7789_COLORS['WHITE'])
         
         if active_iso:  
             self.draw.rectangle((0, 24, 240, 40), fill=ST7789_COLORS['BLUE'])  

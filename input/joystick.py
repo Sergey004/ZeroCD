@@ -63,11 +63,15 @@ class Joystick:
 
     def _read_pin(self, name: str) -> bool:
         """Read current state of a pin.
-        Returns True if button is pressed (value == 0 due to pull-up).
+        Returns True if button is pressed.
+        With pull-up: value is True when released, False when pressed.
         """
         pin = self.pins.get(name)
         if pin:
-            return pin.value == 0  # Active LOW with pull-up
+            pressed = not pin.value  # Invert: False = pressed
+            if pressed:
+                self.logger.debug(f"Button {name} pressed (raw={pin.value})")
+            return pressed
         return False
 
     def _get_direction(self) -> Direction:
@@ -120,13 +124,16 @@ class Joystick:
         """Background polling loop."""
         last_directions = {d: 0 for d in Direction}
         debounce_time = 0.1
+        self.logger.info("Joystick polling started")
 
         while self.running:
             direction = self._get_direction()
             now = time.time()
 
             if direction != Direction.NONE:
+                self.logger.debug(f"Button detected: {direction.value}")
                 if now - last_directions[direction] > debounce_time:
+                    self.logger.info(f"Button triggered: {direction.value}")
                     if self.callback:
                         self.callback(direction)
                     last_directions[direction] = now
