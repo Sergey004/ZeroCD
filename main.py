@@ -158,11 +158,12 @@ class ZeroCDApp:
             else:
                 self.joystick.start_polling(self.on_joystick_event)
         else:
-            # Gadget already bound in init(), start joystick polling if available
-            if hasattr(self.joystick, '_available') and self.joystick._available:
+            # Start joystick polling - if it was created successfully, it should work
+            try:
                 self.joystick.start_polling(self.on_joystick_event)
-            else:
-                self.logger.warning("Joystick not available, USB CD-ROM mode only")
+                self.logger.info("Joystick polling started")
+            except Exception as e:
+                self.logger.warning(f"Joystick not available: {e}, USB CD-ROM mode only")
 
         self.update_display()
 
