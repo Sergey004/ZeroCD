@@ -229,6 +229,26 @@ class ST7789:
         if self.GPIO_BL_PIN:
             self.GPIO_BL_PIN.value = 1.0 if on else 0.0
 
+    def fade_out(self, steps: int = 20, step_delay_ms: int = 50):
+        """Gradually fade out backlight."""
+        if not self.GPIO_BL_PIN:
+            return
+        current = self.GPIO_BL_PIN.value
+        start = int(current * 100)
+        for duty in range(start, 0, max(1, start // steps)):
+            self.bl_DutyCycle(duty)
+            time.sleep(step_delay_ms / 1000.0)
+        self._backlight(False)
+
+    def fade_in(self, target_duty: int = 50, steps: int = 20, step_delay_ms: int = 50):
+        """Gradually fade in backlight."""
+        if not self.GPIO_BL_PIN:
+            return
+        self._backlight(False)
+        for duty in range(1, target_duty + 1, max(1, target_duty // steps)):
+            self.bl_DutyCycle(duty)
+            time.sleep(step_delay_ms / 1000.0)
+
     def digital_read(self, pin):
         """Read pin value like lcd_hat. Returns 0 when pressed (active LOW)."""
         if pin:

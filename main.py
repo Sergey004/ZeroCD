@@ -10,7 +10,7 @@ import sys
 import os
 import subprocess
 
-from config import ISO_DIR, USE_PC_EMULATION, TEST_ISO_DIR
+from config import ISO_DIR, USE_PC_EMULATION, TEST_ISO_DIR, BACKLIGHT_TIMEOUT_SECONDS, BACKLIGHT_FADE_STEPS, BACKLIGHT_FADE_STEP_MS
 from system.logger import setup_logger, get_logger
 
 if USE_PC_EMULATION:
@@ -46,6 +46,8 @@ class ZeroCDApp:
         self.usb_connected = False
         self.mtp_enabled = False
         self.running = False
+        self.last_activity_time = None
+        self.backlight_on = True
 
     def init(self) -> bool:
         self.logger.info(f"Initializing ZeroCD (PC mode: {USE_PC_EMULATION})")
@@ -96,7 +98,11 @@ class ZeroCDApp:
                     
 
         self.display.show_splash()
-       
+
+        self.last_activity_time = self.get_time()
+        self.backlight_on = True
+        if not USE_PC_EMULATION:
+            self.display.fade_in(target_duty=50, steps=BACKLIGHT_FADE_STEPS, step_delay_ms=BACKLIGHT_FADE_STEP_MS)
 
         self.menu = Menu(self.iso_list, self.on_iso_selected)
         if self.iso_list:
@@ -139,6 +145,28 @@ class ZeroCDApp:
             self.toggle_mtp()
 
         self.update_display()
+        self.reset_activity()
+
+    def reset_activity(self):
+        """Reset activity timer and turn on backlight if needed."""
+        self.last_activity_time = self.get_time()
+        if not self.backlight_on and not USE_PC_EMULATION:
+            self.backlight_on = True
+            self.display.fade_in(target_duty=50, steps=BACKLIGHT_FADE_STEPS, step_delay_ms=BACKLIGHT_FADE_STEP_MS)
+
+    def get_time(self):
+        """Get current time in seconds."""
+        import time
+        return time.time()
+
+    def check_backlight_timeout(self):
+        """Check and handle backlight timeout."""
+        if USE_PC_EMULATION or not self.backlight_on:
+            return
+        elapsed = self.get_time() - self.last_activity_time
+        if elapsed >= BACKLIGHT_TIMEOUT_SECONDS:
+            self.backlight_on = False
+            self.display.fade_out(steps=BACKLIGHT_FADE_STEPS, step_delay_ms=BACKLIGHT_FADE_STEP_MS)
 
     def toggle_wifi(self):
         self.logger.info("WiFi toggle requested")
@@ -329,10 +357,11 @@ class ZeroCDApp:
             time.sleep(0.05)
 
     def _run_pi_loop(self):
-        """Pi mode: just wait."""
+        """Pi mode: check backlight timeout."""
         import time
         while self.running:
-            time.sleep(0.1)
+            self.check_backlight_timeout()
+            time.sleep(0.5)
 
     def shutdown(self):
         self.logger.info("Shutting down ZeroCD")
