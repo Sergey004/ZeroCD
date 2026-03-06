@@ -19,7 +19,7 @@ echo "============================================"
 echo ""
 
 # Check if running as root
-if [ "$EUID" -ne 0 ]; then
+if[ "$EUID" -ne 0 ]; then
     log_error "Please run as root: sudo $0"
     exit 1
 fi
@@ -27,7 +27,7 @@ fi
 # Detect Raspberry Pi via device tree
 log_info "Detecting hardware..."
 IS_RPI=false
-if [ -f /sys/firmware/devicetree/base/model ]; then
+if[ -f /sys/firmware/devicetree/base/model ]; then
     if grep -q "Raspberry" /sys/firmware/devicetree/base/model; then
         IS_RPI=true
         RPI_MODEL=$(cat /sys/firmware/devicetree/base/model)
@@ -36,47 +36,31 @@ if [ -f /sys/firmware/devicetree/base/model ]; then
 fi
 
 if [ "$IS_RPI" = false ]; then
-    log_warn "Not a Raspberry Pi - some features may not work"
+    log_warn "Not a Raspberry Pi - USB gadget features will not work natively"
 fi
 
 # Update package lists
 log_info "Updating package lists..."
 apt-get update -qq
 
-# Install system dependencies
+# Install system dependencies (Добавлены пакеты для сборки C++ и MTP)
 log_info "Installing system dependencies..."
 apt-get install -y -qq \
-    python3 \
-    python3-pip \
-    python3-venv \
-    python3-dev \
-    python3-rpi.gpio \
-    python3-spidev \
-    python3-pil \
-    git \
-    wget \
-    curl \
-    fontconfig \
-    hostapd \
-    dnsmasq \
-    iptables \
+    python3 python3-pip python3-venv python3-dev \
+    python3-rpi.gpio python3-spidev python3-pil \
+    git wget curl fontconfig hostapd dnsmasq iptables \
+    build-essential make gcc libusb-1.0-0-dev \
     || { log_error "Failed to install system packages"; exit 1; }
 
 # Install Python packages
 log_info "Installing Python packages..."
 pip3 install --break-system-packages -q \
-    gpiod \
-    pillow \
-    keyboard \
-    numpy \
-    flask \
-    requests \
-    tqdm \
+    gpiod pillow keyboard numpy flask requests tqdm \
     || { log_error "Failed to install Python packages"; exit 1; }
 
 # Create ZeroCD user directory
 ZEROCD_DIR="/opt/zerocd"
-if [ ! -d "$ZEROCD_DIR" ]; then
+if[ ! -d "$ZEROCD_DIR" ]; then
     log_info "Creating ZeroCD directory..."
     mkdir -p "$ZEROCD_DIR"
 fi
@@ -100,9 +84,9 @@ else
     log_info "Font Awesome already installed"
 fi
 
-# Install DejaVu Sans font (if not exists)
+# Install DejaVu Sans font
 DEJAVU_DIR="/usr/share/fonts/truetype/dejavu"
-if [ ! -d "$DEJAVU_DIR" ]; then
+if[ ! -d "$DEJAVU_DIR" ]; then
     log_info "Installing DejaVu Sans font..."
     apt-get install -y -qq fonts-dejavu-core || true
 fi
@@ -114,14 +98,18 @@ fc-cache -f > /dev/null 2>&1 || true
 # Install uMTP-Responder
 log_info "Installing uMTP-Responder..."
 mkdir -p /etc/umtprd
-cp "$ZEROCD_DIR/conf/umtprd.conf" /etc/umtprd/umtprd.conf
+if [ -f "$ZEROCD_DIR/conf/umtprd.conf" ]; then
+    cp "$ZEROCD_DIR/conf/umtprd.conf" /etc/umtprd/umtprd.conf
+fi
 
 cd "$ZEROCD_DIR/uMTP-Responder"
 if command -v make &> /dev/null; then
     make -j$(nproc)
-    if [ -f umtprd ]; then
+    if[ -f umtprd ]; then
         cp umtprd /usr/local/bin/
         log_info "uMTP-Responder installed"
+    else
+        log_error "uMTP-Responder compilation failed!"
     fi
 else
     log_warn "make not found, skipping uMTP-Responder build"
@@ -129,45 +117,36 @@ fi
 
 cd "$ZEROCD_DIR"
 
-# Enable SPI interface (Raspberry Pi only)
-if [ "$IS_RPI" = true ]; then
-    log_info "Enabling SPI interface..."
-    if [ -f /boot/firmware/config.txt ] || [ -f /boot/config.txt ]; then
-        CONFIG_FILE="/boot/firmware/config.txt"
-        [ -f /boot/config.txt ] && CONFIG_FILE="/boot/config.txt"
+# Raspberry Pi Hardware Configuration
+if[ "$IS_RPI" = true ]; then
+    log_info "Configuring Boot and Kernel Modules..."
+    CONFIG_FILE="/boot/firmware/config.txt"
+    [ -f /boot/config.txt ] && CONFIG_FILE="/boot/config.txt"
 
-        if ! grep -q "^dtparam=spi=on" "$CONFIG_FILE"; then
-            echo "dtparam=spi=on" >> "$CONFIG_FILE"
-            log_info "SPI enabled in $CONFIG_FILE"
-        else
-            log_info "SPI already enabled"
-        fi
-    else
-        log_warn "Could not find boot config.txt"
+    # 1. Enable SPI for Screen
+    if ! grep -q "^dtparam=spi=on" "$CONFIG_FILE"; then
+        echo "dtparam=spi=on" >> "$CONFIG_FILE"
+        log_info "SPI enabled in $CONFIG_FILE"
     fi
-else
-    log_info "Skipping SPI configuration (not a Raspberry Pi)"
+
+    # 2. Enable DWC2 for USB Gadget (КРИТИЧЕСКИ ВАЖНО)
+    if ! grep -q "^dtoverlay=dwc2" "$CONFIG_FILE"; then
+        echo "dtoverlay=dwc2" >> "$CONFIG_FILE"
+        log_info "USB Gadget Mode (dwc2) enabled in $CONFIG_FILE"
+    fi
+
+    # 3. Add modules to autostart
+    if ! grep -q "^dwc2" /etc/modules; then echo "dwc2" >> /etc/modules; fi
+    if ! grep -q "^libcomposite" /etc/modules; then echo "libcomposite" >> /etc/modules; fi
 fi
 
-# Enable SPI device tree
-if [ "$IS_RPI" = true ]; then
-    log_info "Checking SPI device tree..."
-    if [ -d /proc/device-tree/soc/spi@7e204000 ]; then
-        log_info "SPI already enabled in device tree"
-    fi
-fi
-
-# Create symlink for convenience
-log_info "Creating symlink..."
-ln -sf "$ZEROCD_DIR" /home/pi/ZeroCD 2>/dev/null || \
-ln -sf "$ZEROCD_DIR" /root/ZeroCD 2>/dev/null || true
-
-# Set permissions
+# Create symlinks and set permissions
 log_info "Setting permissions..."
+ln -sf "$ZEROCD_DIR" /home/pi/ZeroCD 2>/dev/null || ln -sf "$ZEROCD_DIR" /root/ZeroCD 2>/dev/null || true
 chmod +x "$ZEROCD_DIR/main.py" 2>/dev/null || true
 chmod +x "$ZEROCD_DIR/scripts/"*.sh 2>/dev/null || true
 
-# Create systemd service (optional)
+# Create systemd service
 CREATE_SERVICE=false
 read -p "Create systemd service for auto-start? [y/N]: " -n 1 -r
 echo
@@ -175,12 +154,12 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     CREATE_SERVICE=true
 fi
 
-if [ "$CREATE_SERVICE" = true ]; then
+if[ "$CREATE_SERVICE" = true ]; then
     log_info "Creating systemd service..."
     cat > /etc/systemd/system/zerocd.service << 'EOF'
 [Unit]
-Description=ZeroCD USB CD-ROM Emulator
-After=network.target
+Description=ZeroCD USB Emulator
+After=local-fs.target network.target
 
 [Service]
 Type=simple
@@ -197,7 +176,6 @@ EOF
     systemctl daemon-reload
     systemctl enable zerocd.service
     log_info "Systemd service created and enabled"
-    log_info "Start with: systemctl start zerocd"
 fi
 
 echo ""
@@ -205,26 +183,14 @@ echo "============================================"
 echo -e "${GREEN}  ZeroCD Installation Complete!${NC}"
 echo "============================================"
 echo ""
-echo "Location: $ZEROCD_DIR"
-echo ""
-echo "To run manually:"
-echo "  cd $ZEROCD_DIR"
-echo "  sudo python3 main.py"
-echo ""
-if [ "$CREATE_SERVICE" = true ]; then
-    echo "To start on boot:"
-    echo "  sudo systemctl start zerocd"
-fi
-echo ""
-echo "For PC emulation mode (testing):"
-echo "  ZEROCD_PLATFORM=pc python3 $ZEROCD_DIR/main.py"
-echo ""
 
-# Reboot prompt
-read -p "Reboot now to apply SPI changes? [y/N]: " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    log_info "Rebooting in 5 seconds..."
-    sleep 5
-    reboot
+if [ "$IS_RPI" = true ]; then
+    echo -e "${YELLOW}A reboot is REQUIRED to apply USB and SPI hardware changes.${NC}"
+    read -p "Reboot now? [y/N]: " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        log_info "Rebooting in 5 seconds..."
+        sleep 5
+        reboot
+    fi
 fi

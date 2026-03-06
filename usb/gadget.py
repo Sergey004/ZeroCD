@@ -26,7 +26,7 @@ class GadgetManager:
         self.config_name = "c.1"
         self.function_name = "mass_storage.usb0"
         self._udc = None
-        self._current_mode_is_cdrom = True  # По умолчанию мы CD-ROM
+        self._current_mode_is_cdrom = True
 
     def _check_module(self, module_name):
         try:
@@ -98,10 +98,6 @@ class GadgetManager:
                         if 'mass_storage' in item:
                             if 'lun.0' in os.listdir(fp):
                                 with open(f"{fp}/lun.0/file", 'w') as f: f.write('\n')
-                            if 'lun.1' in os.listdir(fp):
-                                with open(f"{fp}/lun.1/file", 'w') as f: f.write('\n')
-                                try: os.rmdir(f"{fp}/lun.1") 
-                                except: pass
                         os.rmdir(fp)
                 except: pass
 
@@ -147,14 +143,17 @@ class GadgetManager:
             os.makedirs(f'{gadget_path}/strings/0x409', exist_ok=True)
             self._write_file(f'{gadget_path}/strings/0x409/manufacturer', 'ZeroCD')
             self._write_file(f'{gadget_path}/strings/0x409/product', 'CD + Ethernet')
-            self._write_file(f'{gadget_path}/strings/0x409/serialnumber', 'zero cd 2026')
+            
+            # --- ГЛАВНАЯ МАГИЯ ПРОТИВ КЭШИРОВАНИЯ ---
+            # Генерируем уникальный серийный номер при каждой пересборке
+            unique_sn = f'zerocd-{int(time.time())}'
+            self._write_file(f'{gadget_path}/strings/0x409/serialnumber', unique_sn)
 
             config_path = f'{gadget_path}/configs/{self.config_name}'
             os.makedirs(config_path, exist_ok=True)
             os.makedirs(f'{config_path}/strings/0x409', exist_ok=True)
             self._write_file(f'{config_path}/strings/0x409/configuration', 'CD-ROM + LAN')
 
-            # ДИНАМИЧЕСКИЙ LUN.0 (Становится то Дисководом, то Флешкой)
             ms_path = f'{gadget_path}/functions/mass_storage.usb0'
             os.makedirs(ms_path, exist_ok=True)
             time.sleep(0.1)
@@ -170,7 +169,7 @@ class GadgetManager:
 
             os.symlink(ms_path, f'{config_path}/mass_storage.usb0')
 
-            # Сеть (оставляем без изменений)
+            # Network
             rndis_path = f'{gadget_path}/functions/rndis.usb0'
             os.makedirs(rndis_path, exist_ok=True)
             self._write_file(f'{rndis_path}/host_addr', '02:00:00:00:00:01')
@@ -232,22 +231,29 @@ class GadgetManager:
 
     def set_iso(self, iso_path: str) -> bool:
         if not os.path.exists(iso_path) or not os.access(iso_path, os.R_OK):
+            self.logger.error(f"Cannot access file: {iso_path}")
             return False
-        
+            
         iso_path = os.path.abspath(iso_path)
+        
+        # Если образ уже активен - ничего не делаем, чтобы не переподключать USB впустую
+        if getattr(self, 'current_iso', None) == iso_path:
+            self.logger.info("This image is already mounted. Skipping.")
+            return True
+            
         is_cdrom = iso_path.lower().endswith('.iso')
         
         try:
             needs_rebuild = getattr(self, '_current_mode_is_cdrom', None) != is_cdrom
             was_bound = (self.state == GadgetState.ACTIVE)
             
-            # --- ИСПРАВЛЕНИЕ: ВСЕГДА "выдергиваем" USB-кабель перед сменой образа ---
+            # 1. Железно отключаем USB-кабель при любой смене образа
             if was_bound:
                 self.logger.info("Unbinding USB for safe image swap...")
                 self.unbind()
-                time.sleep(1.5)  # Ждем 1.5 секунды, чтобы ПК точно зафиксировал отключение
+                time.sleep(1.0) # Ждем, чтобы ПК точно зафиксировал отключение
             
-            # Если нужно сменить тип (CD-ROM <-> Флешка) - пересобираем структуру
+            # 2. Если меняем ISO на IMG (или наоборот), пересобираем структуру гаджета
             if needs_rebuild:
                 self.logger.info(f"Rebuilding USB gadget for {'CD-ROM' if is_cdrom else 'Flash Drive'} mode...")
                 if not self._create_gadget_structure(is_cdrom=is_cdrom):
@@ -256,21 +262,24 @@ class GadgetManager:
                 
             lun0_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.0/file'
             
-            # Очищаем лоток (на всякий случай)
+            # 3. Выплевываем старый диск, пока кабель отключен
+            self.logger.info("Ejecting medium...")
             self._write_file(lun0_file, '\n')
-            time.sleep(0.2)
+            time.sleep(0.5)
             
-            # Вставляем новый образ в виртуальный привод
-            self.logger.info(f"Inserting new image: {iso_path}")
+            # 4. Вставляем новый диск
+            self.logger.info(f"Inserting medium: {iso_path}")
             self._write_file(lun0_file, iso_path)
+            time.sleep(0.5)
             
-            # --- "Втыкаем" USB-кабель обратно ---
+            # 5. Возвращаем USB-кабель в компьютер
             if was_bound:
                 self.logger.info("Rebinding USB...")
                 self.bind()
                 time.sleep(1.0)
             
             self.current_iso = iso_path
+            self.logger.info("Swap complete!")
             return True
             
         except Exception as e:
