@@ -162,10 +162,21 @@ class GadgetManager:
             lun0_path = f'{ms_path}/lun.0'
             os.makedirs(lun0_path, exist_ok=True)
             time.sleep(0.2)
-            self._write_file(f'{lun0_path}/removable', '1')
-            self._write_file(f'{lun0_path}/ro', '1')
-            self._write_file(f'{lun0_path}/cdrom', '1' if is_cdrom else '0')
-            self._write_file(f'{lun0_path}/nofua', '0')
+
+            # --- УМНАЯ НАСТРОЙКА ПРИВОДА В ЗАВИСИМОСТИ ОТ ТИПА ОБРАЗА ---
+            if is_cdrom:
+                # Режим CD-ROM (Для .iso)
+                self._write_file(f'{lun0_path}/removable', '1') # Можно извлекать
+                self._write_file(f'{lun0_path}/ro', '1')        # Только чтение
+                self._write_file(f'{lun0_path}/cdrom', '1')     # Это CD-ROM
+                self._write_file(f'{lun0_path}/nofua', '0')
+            else:
+                # Режим Внешнего Жесткого Диска (Для .img)
+                self._write_file(f'{lun0_path}/removable', '0') # Представляемся НЕ съемным (Fixed Disk)
+                self._write_file(f'{lun0_path}/ro', '0')        # РАЗРЕШАЕМ ЗАПИСЬ (Критично для загрузки ОС)
+                self._write_file(f'{lun0_path}/cdrom', '0')     # Это НЕ CD-ROM
+                self._write_file(f'{lun0_path}/nofua', '1')     # Отключаем принудительную синхронизацию (ОЧЕНЬ ускоряет работу и спасает от отвалов по таймауту)
+            # -----------------------------------------------------------
 
             os.symlink(ms_path, f'{config_path}/mass_storage.usb0')
 
