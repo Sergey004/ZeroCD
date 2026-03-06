@@ -131,16 +131,18 @@ class GadgetManager:
             except Exception as e:
                 self.logger.error(f"Failed to remove config: {e}")
 
-        # Remove functions
+       # Remove functions
         functions_path = f"{gadget_path}/functions"
         if os.path.exists(functions_path):
             for item in os.listdir(functions_path):
                 fp = f"{functions_path}/{item}"
                 try:
                     if os.path.isdir(fp):
-                        if 'mass_storage' in item and 'lun.0' in os.listdir(fp):
-                            with open(f"{fp}/lun.0/file", 'w') as f:
-                                f.write('\n')
+                        if 'mass_storage' in item:
+                            if 'lun.0' in os.listdir(fp):
+                                with open(f"{fp}/lun.0/file", 'w') as f: f.write('\n')
+                            if 'lun.1' in os.listdir(fp):
+                                with open(f"{fp}/lun.1/file", 'w') as f: f.write('\n')
                         os.rmdir(fp)
                 except Exception as e:
                     self.logger.error(f"Failed to remove function {item}: {e}")
@@ -219,20 +221,26 @@ class GadgetManager:
             os.makedirs(f'{config_path}/strings/0x409', exist_ok=True)
             self._write_file(f'{config_path}/strings/0x409/configuration', 'CD-ROM + LAN')
             
-            # CD-ROM
-            ms_path = f'{gadget_path}/functions/mass_storage.usb0'
-            os.makedirs(ms_path, exist_ok=True)
-            time.sleep(0.1)
-            self._write_file(f'{ms_path}/stall', '1')
-            
-            lun_path = f'{ms_path}/lun.0'
+            # LUN 0 (CD-ROM для .iso)
+            lun_path = f'{gadget_path}/lun.0'
             os.makedirs(lun_path, exist_ok=True)
             time.sleep(0.2)
             self._write_file(f'{lun_path}/removable', '1')
             self._write_file(f'{lun_path}/ro', '1')     
             self._write_file(f'{lun_path}/cdrom', '1')
             self._write_file(f'{lun_path}/nofua', '0')
-            os.symlink(ms_path, f'{config_path}/mass_storage.usb0')
+            
+            # --- НОВОЕ: LUN 1 (USB Flash Drive для .img) ---
+            lun1_path = f'{gadget_path}/lun.1'
+            os.makedirs(lun1_path, exist_ok=True)
+            time.sleep(0.2)
+            self._write_file(f'{lun1_path}/removable', '1')
+            self._write_file(f'{lun1_path}/ro', '1') # Если хотите, чтобы в .img можно было писать с ПК, поставьте '0'
+            self._write_file(f'{lun1_path}/cdrom', '0') # 0 = Обычная флешка!
+            self._write_file(f'{lun1_path}/nofua', '0')
+            # -----------------------------------------------
+            
+            os.symlink(gadget_path, f'{config_path}/mass_storage.usb0')
             
             # Ethernet RNDIS (Windows)
             rndis_path = f'{gadget_path}/functions/rndis.usb0'
@@ -362,7 +370,26 @@ class GadgetManager:
                 time.sleep(1.5)  # Ждем, чтобы Windows точно заметила отключение
             
             # 3. Меняем файл диска
-            lun_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.0/file'
+            lun0_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.0/file'
+            lun1_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.1/file'
+            
+            # Определяем тип образа
+            is_cdrom = iso_path.lower().endswith('.iso')
+            
+            # Извлекаем диски из ОБОИХ приводов
+            self.logger.info("Ejecting current images from all drives...")
+            self._write_file(lun0_file, '\n')
+            self._write_file(lun1_file, '\n')
+            time.sleep(0.8)
+            
+            # Вставляем новый образ в нужный привод
+            self.logger.info(f"Inserting new image: {iso_path} (CD-ROM mode: {is_cdrom})")
+            if is_cdrom:
+                self._write_file(lun0_file, iso_path)
+            else:
+                self._write_file(lun1_file, iso_path)
+            
+            time.sleep(0.5)
             
             self.logger.info(f"Inserting new ISO: {iso_path}")
             # Просто перезаписываем путь к файлу. При unbind он вставится без проблем.
