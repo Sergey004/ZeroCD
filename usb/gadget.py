@@ -238,41 +238,39 @@ class GadgetManager:
         is_cdrom = iso_path.lower().endswith('.iso')
         
         try:
-            # Проверяем, нужно ли нам превратиться из Флешки в CD-ROM или наоборот
             needs_rebuild = getattr(self, '_current_mode_is_cdrom', None) != is_cdrom
+            was_bound = (self.state == GadgetState.ACTIVE)
             
+            # --- ИСПРАВЛЕНИЕ: ВСЕГДА "выдергиваем" USB-кабель перед сменой образа ---
+            if was_bound:
+                self.logger.info("Unbinding USB for safe image swap...")
+                self.unbind()
+                time.sleep(1.5)  # Ждем 1.5 секунды, чтобы ПК точно зафиксировал отключение
+            
+            # Если нужно сменить тип (CD-ROM <-> Флешка) - пересобираем структуру
             if needs_rebuild:
                 self.logger.info(f"Rebuilding USB gadget for {'CD-ROM' if is_cdrom else 'Flash Drive'} mode...")
-                was_bound = (self.state == GadgetState.ACTIVE)
-                
-                if was_bound:
-                    self.unbind()
-                    time.sleep(1.0) # Даем ОС время понять, что устройство отключено
-                
-                # Пересобираем гаджет с новым типом устройства на LUN.0
                 if not self._create_gadget_structure(is_cdrom=is_cdrom):
                     return False
-                    
                 self._current_mode_is_cdrom = is_cdrom
                 
-                # Записываем файл диска ДО подключения к ПК
-                lun0_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.0/file'
-                self._write_file(lun0_file, iso_path)
-                
-                if was_bound:
-                    self.bind()
-                    time.sleep(1.0)
-            else:
-                # Если тип совпадает, просто меняем диск "на горячую"
-                lun0_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.0/file'
-                self.logger.info("Ejecting current image...")
-                self._write_file(lun0_file, '\n')
-                time.sleep(0.8)
-                self.logger.info(f"Inserting new image: {iso_path}")
-                self._write_file(lun0_file, iso_path)
+            lun0_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.0/file'
+            
+            # Очищаем лоток (на всякий случай)
+            self._write_file(lun0_file, '\n')
+            time.sleep(0.2)
+            
+            # Вставляем новый образ в виртуальный привод
+            self.logger.info(f"Inserting new image: {iso_path}")
+            self._write_file(lun0_file, iso_path)
+            
+            # --- "Втыкаем" USB-кабель обратно ---
+            if was_bound:
+                self.logger.info("Rebinding USB...")
+                self.bind()
+                time.sleep(1.0)
             
             self.current_iso = iso_path
-            time.sleep(0.5)
             return True
             
         except Exception as e:
