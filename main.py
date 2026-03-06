@@ -244,14 +244,31 @@ class ZeroCDApp:
                 if self.gadget.init():
                     if self.gadget.bind():
                         self.usb_connected = True
-                    
-                    # Возвращаем активный образ в дисковод
-                    if self.active_iso:
-                        iso_path = self.iso_manager.get_iso_path(self.active_iso)
-                        if iso_path:
-                            self.gadget.set_iso(iso_path)
-                            
+            
+            # 5. ОБНОВЛЯЕМ СПИСОК ISO-ОБРАЗОВ
+            self.logger.info("Refreshing ISO list after MTP session...")
+            self.iso_list = self.iso_manager.list_isos()
+            self.logger.info(f"Found {len(self.iso_list)} ISO files")
+            
+            # Пересоздаем меню с новыми файлами
+            self.menu = Menu(self.iso_list, self.on_iso_selected)
+            
+            # Проверяем, не удалил ли пользователь наш активный образ
+            if self.active_iso not in self.iso_list:
+                self.logger.info("Previous active ISO was removed or renamed.")
+                self.active_iso = self.iso_list[0] if self.iso_list else None
+            
+            # 6. Возвращаем активный образ обратно в дисковод
+            if self.active_iso and self.usb_connected:
+                iso_path = self.iso_manager.get_iso_path(self.active_iso)
+                if iso_path:
+                    self.gadget.set_iso(iso_path)
+            
+            # Принудительно обновляем экран, чтобы новые файлы появились в списке
+            self.update_display()
             self.logger.info("CD-ROM mode restored successfully")
+
+            
     def update_display(self):
         if self.display:
             self.display.draw_menu(
