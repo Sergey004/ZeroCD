@@ -27,6 +27,43 @@ class GadgetManager:
         self.function_name = "mass_storage.usb0"
         self._udc = None
         self._current_mode_is_cdrom = True
+        
+        # Генерируем постоянные MAC-адреса на основе серийника Raspberry Pi
+        self._generate_mac_addresses()
+
+    def _generate_mac_addresses(self):
+        """Generates stable MAC addresses based on Pi's Serial Number (like ethernet-configfs.sh)"""
+        try:
+            with open('/proc/cpuinfo', 'r') as f:
+                for line in f:
+                    if line.startswith('Serial'):
+                        serial = line.split(':')[1].strip()
+                        # Добиваем нулями слева до 16 символов
+                        padded = serial.zfill(16)
+                        # Берем последние 10 символов
+                        last_10 = padded[-10:]
+                        # Разбиваем на пары с двоеточиями
+                        pairs =[last_10[i:i+2] for i in range(0, 10, 2)]
+                        base_mac = ":" + ":".join(pairs)
+                        
+                        # RNDIS (Windows)
+                        self._host_mac_rndis = "02" + base_mac
+                        self._dev_mac_rndis  = "06" + base_mac
+                        
+                        # ECM (Mac/Linux)
+                        self._host_mac_ecm   = "12" + base_mac
+                        self._dev_mac_ecm    = "16" + base_mac
+                        
+                        self.logger.info(f"Generated stable MAC based on serial: {serial}")
+                        return
+        except Exception as e:
+            self.logger.warning(f"Could not read Pi Serial for MAC: {e}")
+            
+        # Запасные MAC-адреса, если серийник прочитать не удалось
+        self._host_mac_rndis = "02:00:00:00:00:01"
+        self._dev_mac_rndis  = "06:00:00:00:00:02"
+        self._host_mac_ecm   = "12:00:00:00:00:03"
+        self._dev_mac_ecm    = "16:00:00:00:00:04"
 
     def _check_module(self, module_name):
         try:
@@ -144,8 +181,7 @@ class GadgetManager:
             self._write_file(f'{gadget_path}/strings/0x409/manufacturer', 'ZeroCD')
             self._write_file(f'{gadget_path}/strings/0x409/product', 'CD + Ethernet')
             
-            # --- ГЛАВНАЯ МАГИЯ ПРОТИВ КЭШИРОВАНИЯ ---
-            # Генерируем уникальный серийный номер при каждой пересборке
+            # Уникальный серийный номер для предотвращения кэширования
             unique_sn = f'zerocd-{int(time.time())}'
             self._write_file(f'{gadget_path}/strings/0x409/serialnumber', unique_sn)
 
@@ -153,6 +189,9 @@ class GadgetManager:
             os.makedirs(config_path, exist_ok=True)
             os.makedirs(f'{config_path}/strings/0x409', exist_ok=True)
             self._write_file(f'{config_path}/strings/0x409/configuration', 'CD-ROM + LAN')
+            
+            # Устанавливаем MaxPower (250 * 2mA = 500mA) как в вашем скрипте
+            self._write_file(f'{config_path}/MaxPower', '250')
 
             ms_path = f'{gadget_path}/functions/mass_storage.usb0'
             os.makedirs(ms_path, exist_ok=True)
@@ -163,38 +202,36 @@ class GadgetManager:
             os.makedirs(lun0_path, exist_ok=True)
             time.sleep(0.2)
 
-            # --- УМНАЯ НАСТРОЙКА ПРИВОДА В ЗАВИСИМОСТИ ОТ ТИПА ОБРАЗА ---
             if is_cdrom:
-                # Режим CD-ROM (Для .iso)
-                self._write_file(f'{lun0_path}/removable', '1') # Можно извлекать
-                self._write_file(f'{lun0_path}/ro', '1')        # Только чтение
-                self._write_file(f'{lun0_path}/cdrom', '1')     # Это CD-ROM
+                self._write_file(f'{lun0_path}/removable', '1')
+                self._write_file(f'{lun0_path}/ro', '1')
+                self._write_file(f'{lun0_path}/cdrom', '1')
                 self._write_file(f'{lun0_path}/nofua', '0')
             else:
-                # Режим Внешнего Жесткого Диска (Для .img)
-                self._write_file(f'{lun0_path}/removable', '0') # Представляемся НЕ съемным (Fixed Disk)
-                self._write_file(f'{lun0_path}/ro', '0')        # РАЗРЕШАЕМ ЗАПИСЬ (Критично для загрузки ОС)
-                self._write_file(f'{lun0_path}/cdrom', '0')     # Это НЕ CD-ROM
-                self._write_file(f'{lun0_path}/nofua', '1')     # Отключаем принудительную синхронизацию (ОЧЕНЬ ускоряет работу и спасает от отвалов по таймауту)
-            # -----------------------------------------------------------
+                self._write_file(f'{lun0_path}/removable', '0')
+                self._write_file(f'{lun0_path}/ro', '0')
+                self._write_file(f'{lun0_path}/cdrom', '0')
+                self._write_file(f'{lun0_path}/nofua', '1')
 
             os.symlink(ms_path, f'{config_path}/mass_storage.usb0')
 
-            # Network
+            # --- Network Configuration ---
+            # RNDIS
             rndis_path = f'{gadget_path}/functions/rndis.usb0'
             os.makedirs(rndis_path, exist_ok=True)
-            self._write_file(f'{rndis_path}/host_addr', '02:00:00:00:00:01')
-            self._write_file(f'{rndis_path}/dev_addr', '02:00:00:00:00:02')
+            self._write_file(f'{rndis_path}/host_addr', self._host_mac_rndis)
+            self._write_file(f'{rndis_path}/dev_addr', self._dev_mac_rndis)
             rndis_os_desc = f'{rndis_path}/os_desc/interface.rndis'
             if os.path.exists(rndis_os_desc):
                 self._write_file(f'{rndis_os_desc}/compatible_id', 'RNDIS')
                 self._write_file(f'{rndis_os_desc}/sub_compatible_id', '5162001')
             os.symlink(rndis_path, f'{config_path}/rndis.usb0')
 
+            # ECM
             ecm_path = f'{gadget_path}/functions/ecm.usb0'
             os.makedirs(ecm_path, exist_ok=True)
-            self._write_file(f'{ecm_path}/host_addr', '02:00:00:00:00:03')
-            self._write_file(f'{ecm_path}/dev_addr', '02:00:00:00:00:04')
+            self._write_file(f'{ecm_path}/host_addr', self._host_mac_ecm)
+            self._write_file(f'{ecm_path}/dev_addr', self._dev_mac_ecm)
             os.symlink(ecm_path, f'{config_path}/ecm.usb0')
 
             try: os.symlink(config_path, f'{gadget_path}/os_desc/c.1')
@@ -247,7 +284,6 @@ class GadgetManager:
             
         iso_path = os.path.abspath(iso_path)
         
-        # Если образ уже активен - ничего не делаем, чтобы не переподключать USB впустую
         if getattr(self, 'current_iso', None) == iso_path:
             self.logger.info("This image is already mounted. Skipping.")
             return True
@@ -258,13 +294,11 @@ class GadgetManager:
             needs_rebuild = getattr(self, '_current_mode_is_cdrom', None) != is_cdrom
             was_bound = (self.state == GadgetState.ACTIVE)
             
-            # 1. Железно отключаем USB-кабель при любой смене образа
             if was_bound:
                 self.logger.info("Unbinding USB for safe image swap...")
                 self.unbind()
-                time.sleep(1.0) # Ждем, чтобы ПК точно зафиксировал отключение
+                time.sleep(1.0)
             
-            # 2. Если меняем ISO на IMG (или наоборот), пересобираем структуру гаджета
             if needs_rebuild:
                 self.logger.info(f"Rebuilding USB gadget for {'CD-ROM' if is_cdrom else 'Flash Drive'} mode...")
                 if not self._create_gadget_structure(is_cdrom=is_cdrom):
@@ -273,17 +307,14 @@ class GadgetManager:
                 
             lun0_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.0/file'
             
-            # 3. Выплевываем старый диск, пока кабель отключен
             self.logger.info("Ejecting medium...")
             self._write_file(lun0_file, '\n')
             time.sleep(0.5)
             
-            # 4. Вставляем новый диск
             self.logger.info(f"Inserting medium: {iso_path}")
             self._write_file(lun0_file, iso_path)
             time.sleep(0.5)
             
-            # 5. Возвращаем USB-кабель в компьютер
             if was_bound:
                 self.logger.info("Rebinding USB...")
                 self.bind()
