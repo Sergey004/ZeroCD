@@ -67,7 +67,7 @@ try:
         
         # ШИМ на 500 Гц, скважность 50% (можно менять от 0 до 100)
         pwm = GPIO.PWM(BL_PIN, 500)
-        pwm.start(50) 
+        pwm.start(5) 
         
         print("Splash screen running at 50% brightness.")
         print("Press Ctrl+C to stop.")

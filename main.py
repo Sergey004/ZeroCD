@@ -65,6 +65,21 @@ class ZeroCDApp:
                 self.logger.error("Failed to initialize display")
                 return False
             
+            # --- Устанавливаем яркость 50% ---
+            import RPi.GPIO as GPIO
+            bl_pin = 24
+            if hasattr(self.display, 'disp') and hasattr(self.display.disp, '_bl'):
+                bl_pin = self.display.disp._bl
+                
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setwarnings(False)
+            GPIO.setup(bl_pin, GPIO.OUT)
+            
+            # Сохраняем pwm в self, чтобы сборщик мусора Python не удалил его!
+            self.display_pwm = GPIO.PWM(bl_pin, 500)
+            self.display_pwm.start(50)  # <-- Тут можно менять % яркости
+            # ---------------------------------
+            
             # Pass display to joystick for button reading
             self.joystick = Joystick(disp=self.display, callback=self.on_joystick_event)
             
