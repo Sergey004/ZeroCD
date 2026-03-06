@@ -8,8 +8,7 @@ from typing import List, Optional
 
 
 class DisplayPC:
-    """
-    PC-based display emulator using curses TUI.
+    """PC-based display emulator using curses TUI.
 
     Features:
     - Curses-based menu display
@@ -77,13 +76,14 @@ class DisplayPC:
         self,
         items: List[str],
         selected_index: int,
+        scroll_offset: int = 0,
         active_iso: Optional[str] = None,
         wifi_on: bool = False,
         usb_bound: bool = False
     ):
         """Draw ISO selection menu."""
         if not self.use_curses:
-            self._draw_console(items, selected_index, active_iso, wifi_on, usb_bound)
+            self._draw_console(items, selected_index, scroll_offset, active_iso, wifi_on, usb_bound)
             return
 
         self.stdscr.clear()
@@ -97,7 +97,7 @@ class DisplayPC:
         self.stdscr.addstr(0, 0, title.ljust(width - 1))
         self.stdscr.attroff(curses.color_pair(1) | curses.A_REVERSE)
 
-        status = f" USB: {usb_status}  Wi-Fi: {wifi_status} "
+        status = f" USB: {usb_status} Wi-Fi: {wifi_status} "
         self.stdscr.addstr(1, width - len(status) - 1, status)
 
         if active_iso:
@@ -108,29 +108,30 @@ class DisplayPC:
 
         self.stdscr.addstr(4, 0, " Select ISO:", curses.A_BOLD)
 
-        visible_items = items[:5]
+        visible_items = items
         for i, item in enumerate(visible_items):
             y = 5 + i
-            prefix = ">" if i == selected_index else " "
+            global_index = scroll_offset + i
+            prefix = ">" if global_index == selected_index else " "
             is_active = item == active_iso
 
             display_item = item[:40]
-            if i == selected_index:
+            if global_index == selected_index:
                 self.stdscr.attron(curses.color_pair(6) | curses.A_REVERSE)
                 self.stdscr.addstr(y, 0, f" {prefix} {display_item:<40} ")
                 self.stdscr.attroff(curses.color_pair(6) | curses.A_REVERSE)
             elif is_active:
                 self.stdscr.attron(curses.color_pair(5))
-                self.stdscr.addstr(y, 0, f"   {display_item:<40} *")
+                self.stdscr.addstr(y, 0, f" {display_item:<40} *")
                 self.stdscr.attroff(curses.color_pair(5))
             else:
-                self.stdscr.addstr(y, 0, f"   {display_item:<40} ")
+                self.stdscr.addstr(y, 0, f" {display_item:<40} ")
 
         remaining = 5 - len(visible_items)
         for i in range(remaining):
             self.stdscr.addstr(5 + len(visible_items) + i, 0, " " * 40)
 
-        help_text = " w/s:up/down  Enter:select  d:Wi-Fi  q:quit "
+        help_text = " w/s:up/down Enter:select d:Wi-Fi q:quit "
         help_y = height - 2
         if help_y >= 0:
             self.stdscr.attron(curses.color_pair(4))
@@ -143,22 +144,23 @@ class DisplayPC:
         self.wifi_on = wifi_on
         self.usb_bound = usb_bound
 
-    def _draw_console(self, items, selected_index, active_iso, wifi_on, usb_bound):
+    def _draw_console(self, items, selected_index, scroll_offset, active_iso, wifi_on, usb_bound):
         """Simple console fallback."""
         print("\n" + "=" * 50)
         print(" ZeroCD - USB CD-ROM Emulator ")
-        print(f" USB: {usb_bound}  Wi-Fi: {wifi_on} ")
+        print(f" USB: {usb_bound} Wi-Fi: {wifi_on} ")
         if active_iso:
             print(f" Active: {active_iso}")
         print("=" * 50)
         print(" Select ISO:")
-        visible_items = items[:5]
+        visible_items = items
         for i, item in enumerate(visible_items):
-            prefix = ">" if i == selected_index else " "
+            global_index = scroll_offset + i
+            prefix = ">" if global_index == selected_index else " "
             marker = "*" if item == active_iso else ""
             print(f" {prefix} {item:<40} {marker}")
         print("-" * 50)
-        print(" w/s:up/down  Enter:select  d:Wi-Fi  q:quit")
+        print(" w/s:up/down Enter:select d:Wi-Fi q:quit")
         print("-" * 50)
 
         self.active_iso = active_iso
@@ -202,8 +204,8 @@ class DisplayDummy:
     def show_splash(self):
         print("[SPLASH] ZeroCD v1.0")
 
-    def draw_menu(self, items, selected_index, active_iso=None, wifi_on=False, usb_bound=False):
-        print(f"[MENU] Items: {len(items)}, Selected: {selected_index}, Active: {active_iso}")
+    def draw_menu(self, items, selected_index, scroll_offset=0, active_iso=None, wifi_on=False, usb_bound=False):
+        print(f"[MENU] Items: {len(items)}, Selected: {selected_index}, Offset: {scroll_offset}, Active: {active_iso}")
 
     def draw_status(self, wifi_on, usb_bound, active_iso):
         pass

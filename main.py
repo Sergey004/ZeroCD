@@ -289,6 +289,7 @@ class ZeroCDApp:
             self.display.draw_menu(
                 items=self.menu.get_visible_items() if self.menu else [],
                 selected_index=self.menu.get_index() if self.menu else 0,
+                scroll_offset=self.menu.get_scroll_offset() if self.menu else 0,
                 active_iso=self.active_iso,
                 wifi_on=self.wifi_enabled,
                 usb_bound=self.usb_connected,
