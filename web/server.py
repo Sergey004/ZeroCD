@@ -41,15 +41,19 @@ captive_portal = get_captive_portal()
 
 download_tasks: Dict[str, dict] = {}
 
-# МЫ УДАЛИЛИ БЛОКИРОВКУ GADGET MODE! Теперь WebUI работает всегда.
-
 @app.route('/')
 def index():
-    isos = iso_manager.list_isos()
-    total_size = sum(
-        os.path.getsize(os.path.join(ISO_DIR, f)) 
-        for f in isos if os.path.exists(os.path.join(ISO_DIR, f))
-    )
+    iso_names = iso_manager.list_isos()
+    isos =[]
+    total_size = 0
+    
+    # ИСПРАВЛЕНИЕ: Формируем список словарей с именами И размерами каждого файла
+    for f in iso_names:
+        path = os.path.join(ISO_DIR, f)
+        if os.path.exists(path):
+            sz = os.path.getsize(path)
+            total_size += sz
+            isos.append({'name': f, 'size': format_size(sz)})
     
     disk_total, disk_used, disk_free = get_disk_usage()
     wifi_status = wifi_manager.get_status()
@@ -65,7 +69,7 @@ def index():
         wifi_ssid=wifi_manager.get_current_ssid(),
         wifi_ip=wifi_ip,
         gadget_mode=False,
-        format_size=format_size  # <--- ДОБАВИЛИ ЭТУ СТРОЧКУ
+        format_size=format_size # Передаем функцию форматирования в шаблон
     )
 
 @app.route('/upload', methods=['GET', 'POST'])
@@ -78,7 +82,6 @@ def upload():
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
         
-        # Разрешаем и .iso, и .img
         if not (file.filename.lower().endswith('.iso') or file.filename.lower().endswith('.img')):
             return jsonify({'error': 'Only .iso and .img files allowed'}), 400
         
@@ -108,9 +111,10 @@ def start_download():
     filepath = os.path.join(ISO_DIR, filename)
     task_id = f"download_{int(time.time())}"
     
+    # ИСПРАВЛЕНИЕ: Больше не сохраняем объект потока (thread) в словарь!
     download_tasks[task_id] = {
         'url': url, 'filename': filename, 'filepath': filepath,
-        'progress': 0, 'speed': 0, 'status': 'starting', 'thread': None
+        'progress': 0, 'speed': 0, 'status': 'starting'
     }
     
     def download_task(task_id, url, filepath):
@@ -147,7 +151,6 @@ def start_download():
     
     thread = threading.Thread(target=download_task, args=(task_id, url, filepath), daemon=True)
     thread.start()
-    download_tasks[task_id]['thread'] = thread
     return jsonify({'success': True, 'task_id': task_id})
 
 @app.route('/api/download/status')
@@ -221,11 +224,9 @@ def api_delete():
 
 @app.route('/api/select', methods=['POST'])
 def api_select():
-    # Эта ручка позволяет выбрать образ прямо с телефона!
     filename = request.get_json().get('filename', '')
     path = iso_manager.get_iso_path(filename)
     if path:
-        # Пытаемся сообщить главному приложению, что надо переключить диск
         try:
             import main
             if hasattr(main, 'app') and main.app:
@@ -240,7 +241,7 @@ def api_disk():
     return jsonify({'total': total, 'used': used, 'free': free, 'percent': int(used/total*100) if total > 0 else 0})
 
 def format_size(bytes_size: int) -> str:
-    for unit in['B', 'KB', 'MB', 'GB', 'TB']:
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
         if bytes_size < 1024.0: return f"{bytes_size:.1f} {unit}"
         bytes_size /= 1024.0
     return f"{bytes_size:.1f} PB"
@@ -255,12 +256,9 @@ def get_disk_usage():
     except: return 0, 0, 0
 
 def start_webui(host: str = WEBUI_HOST, port: int = WEBUI_PORT, debug: bool = False):
-    """Start WebUI server. (Вызывается из main.py в фоновом потоке)"""
-    # Отключаем спам в консоль от Flask
     import logging
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.ERROR)
-    
     logger.info(f"Starting WebUI on http://{host}:{port}")
     app.run(host=host, port=port, debug=debug, use_reloader=False)
 

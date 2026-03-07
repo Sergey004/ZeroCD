@@ -63,12 +63,6 @@
 </head>
 <body>
     <div class="container">
-        {% if gadget_mode %}
-        <div class="warning-banner">
-            WARNING: USB Gadget Mode active - WebUI disabled to save power
-        </div>
-        {% endif %}
-        
         <header>
             <h1>ZeroCD</h1>
             <div class="subtitle">USB CD-ROM + LAN Adapter</div>
@@ -117,28 +111,29 @@
         
         <div class="iso-list">
             <div class="iso-header">
-                <span class="iso-title">ISO Files</span>
+                <span class="iso-title">Images</span>
                 <span class="iso-count">{{ isos|length }} files</span>
             </div>
             
             {% if isos %}
+                <!-- ИСПРАВЛЕНИЕ: Берем iso.name и iso.size из словаря -->
                 {% for iso in isos %}
                 <div class="iso-item">
-                    <div class="iso-icon">💿</div>
+                    <div class="iso-icon">{% if iso.name.endswith('.img') %}💾{% else %}💿{% endif %}</div>
                     <div class="iso-info">
-                        <div class="iso-name">{{ iso }}</div>
-                        <div class="iso-size">{{ total_size }}</div>
+                        <div class="iso-name">{{ iso.name }}</div>
+                        <div class="iso-size">{{ iso.size }}</div>
                     </div>
                     <div class="iso-actions">
-                        <button class="iso-btn select" onclick="selectIso('{{ iso }}')">Select</button>
-                        <button class="iso-btn delete" onclick="deleteIso('{{ iso }}')">✕</button>
+                        <button class="iso-btn select" onclick="selectIso('{{ iso.name }}')">Select</button>
+                        <button class="iso-btn delete" onclick="deleteIso('{{ iso.name }}')">✕</button>
                     </div>
                 </div>
                 {% endfor %}
             {% else %}
                 <div class="empty-state">
-                    <p>No ISO files</p>
-                    <p style="margin-top: 10px;">Upload images to use</p>
+                    <p>No images found</p>
+                    <p style="margin-top: 10px;">Upload .iso or .img files to use</p>
                 </div>
             {% endif %}
         </div>
