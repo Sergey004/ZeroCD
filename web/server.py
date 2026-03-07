@@ -64,7 +64,8 @@ def index():
         wifi_connected=wifi_status.value == "connected",
         wifi_ssid=wifi_manager.get_current_ssid(),
         wifi_ip=wifi_ip,
-        gadget_mode=False # Больше не пугаем пользователя баннерами
+        gadget_mode=False,
+        format_size=format_size  # <--- ДОБАВИЛИ ЭТУ СТРОЧКУ
     )
 
 @app.route('/upload', methods=['GET', 'POST'])
