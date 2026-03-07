@@ -222,25 +222,33 @@ class GadgetManager:
     def _setup_usb_network_dhcp(self):
         """Поднимаем интерфейс usb0 и запускаем DHCP для ПК (Mac/Windows)"""
         def task():
-            time.sleep(1.5) # Ждем, пока ядро создаст usb0 после bind()
+            # Ждем появления интерфейса usb0 (после bind() он создается ядром не мгновенно)
+            for _ in range(10):
+                time.sleep(0.5)
+                if os.path.exists('/sys/class/net/usb0'):
+                    break
+                    
             try:
+                # Убиваем старые процессы dnsmasq, чтобы они не конфликтовали
+                subprocess.run(['sudo', 'pkill', '-f', 'zerocd_usb_dhcp.conf'], stderr=subprocess.DEVNULL)
+                
                 # Назначаем IP самой Малинке
-                subprocess.run(['sudo', 'ip', 'addr', 'flush', 'dev', 'usb0'], check=False, stderr=subprocess.DEVNULL)
-                subprocess.run(['sudo', 'ip', 'addr', 'add', '192.168.7.1/24', 'dev', 'usb0'], check=False, stderr=subprocess.DEVNULL)
-                subprocess.run(['sudo', 'ip', 'link', 'set', 'usb0', 'up'], check=False, stderr=subprocess.DEVNULL)
+                subprocess.run(['sudo', 'ip', 'addr', 'flush', 'dev', 'usb0'], stderr=subprocess.DEVNULL)
+                subprocess.run(['sudo', 'ip', 'addr', 'add', '192.168.7.1/24', 'dev', 'usb0'], stderr=subprocess.DEVNULL)
+                subprocess.run(['sudo', 'ip', 'link', 'set', 'usb0', 'up'], stderr=subprocess.DEVNULL)
 
                 # Создаем конфиг для выдачи IP компьютеру
                 conf_path = "/tmp/zerocd_usb_dhcp.conf"
                 with open(conf_path, "w") as f:
+                    f.write("port=0\n")  # КРИТИЧНО: Отключает DNS, предотвращая ошибку занятого 53 порта!
                     f.write("interface=usb0\n")
                     f.write("dhcp-range=192.168.7.2,192.168.7.2,255.255.255.0,1h\n")
                     f.write("dhcp-option=3,192.168.7.1\n") # Шлюз
-                    f.write("dhcp-option=6,8.8.8.8,1.1.1.1\n") # DNS
+                    f.write("dhcp-option=6,8.8.8.8\n")     # Публичный DNS
                 
-                # Убиваем старые процессы и запускаем новый dnsmasq
-                subprocess.run(['sudo', 'pkill', '-f', 'zerocd_usb_dhcp.conf'], check=False, stderr=subprocess.DEVNULL)
-                subprocess.run(['sudo', 'dnsmasq', '-C', conf_path], check=False, stderr=subprocess.DEVNULL)
-                self.logger.info("USB DHCP server started (Host will get 192.168.7.2)")
+                # Запускаем новый dnsmasq
+                subprocess.run(['sudo', 'dnsmasq', '-C', conf_path], stderr=subprocess.DEVNULL)
+                self.logger.info("USB DHCP server configured successfully!")
             except Exception as e:
                 self.logger.error(f"Failed to start USB DHCP: {e}")
                 
@@ -300,32 +308,31 @@ class GadgetManager:
             was_bound = (self.state == GadgetState.ACTIVE)
             lun0_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.0/file'
             
+            # --- ВСЕГДА ОТКЛЮЧАЕМ USB ---
+            # Это единственный способ заставить Windows/Mac перечитать диск 100% раз из 100
+            if was_bound:
+                self.logger.info("Unbinding USB to force host to re-read device...")
+                self.unbind()
+                time.sleep(1.2)
+            
             if needs_rebuild:
-                # Если меняем тип (CDROM <-> HDD), придется пересобрать гаджет (сеть на секунду отпадет)
-                if was_bound:
-                    self.logger.info("Unbinding USB for device type swap...")
-                    self.unbind()
-                    time.sleep(1.0)
-                
                 self.logger.info(f"Rebuilding gadget for {'CD-ROM' if is_cdrom else 'HDD'} mode...")
                 if not self._create_gadget_structure(is_cdrom=is_cdrom):
                     return False
                 self._current_mode_is_cdrom = is_cdrom
                 
-                self._write_file(lun0_file, iso_path)
-                
-                if was_bound:
-                    self.bind()
-                    time.sleep(1.0)
-            else:
-                # Если тип тот же, просто выплевываем диск "НА ГОРЯЧУЮ", не обрывая RNDIS/ECM сеть!
-                self.logger.info("Ejecting medium...")
-                self._write_file(lun0_file, '\n')
-                time.sleep(0.8)
-                
-                self.logger.info(f"Inserting new medium: {iso_path}")
-                self._write_file(lun0_file, iso_path)
-                time.sleep(0.5)
+            # Записываем файл диска в слот
+            self.logger.info("Ejecting medium...")
+            self._write_file(lun0_file, '\n')
+            time.sleep(0.5)
+            self.logger.info(f"Inserting new medium: {iso_path}")
+            self._write_file(lun0_file, iso_path)
+            
+            # --- ПОДКЛЮЧАЕМ ОБРАТНО ---
+            if was_bound:
+                self.logger.info("Rebinding USB...")
+                self.bind()
+                time.sleep(1.0)
             
             self.current_iso = iso_path
             self.logger.info("Swap complete!")
@@ -333,6 +340,8 @@ class GadgetManager:
             
         except Exception as e:
             self.logger.error(f"Failed to set image: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             return False
 
     def shutdown(self):

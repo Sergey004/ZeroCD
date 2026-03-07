@@ -82,31 +82,24 @@ class ST7789:
         time.sleep(0.01)
 
     def _module_init(self):
-        """Initialize SPI and GPIO like lcd_hat."""
-        if not HAS_HARDWARE:
-            return False
-
-        # Initialize GPIO pins using gpiozero
+        """Initialize SPI and GPIO."""
+        if not HAS_HARDWARE: return False
+        
+        # ИСПРАВЛЕНИЕ: Используем DigitalOutputDevice вместо PWMOutputDevice
+        # Экран больше не будет мерцать под нагрузкой!
         self.GPIO_RST_PIN = DigitalOutputDevice(self._rst_pin_num, active_high=True, initial_value=False)
         self.GPIO_DC_PIN = DigitalOutputDevice(self._dc_pin_num, active_high=True, initial_value=False)
-        self.GPIO_BL_PIN = PWMOutputDevice(self._bl_pin_num, frequency=1000)
-        self.GPIO_BL_PIN.value = 0 # Backlight off initially
+        self.GPIO_BL_PIN = DigitalOutputDevice(self._bl_pin_num, active_high=True, initial_value=False)
 
-        # Initialize SPI
         self.SPI = spidev.SpiDev(0, 0)
         self.SPI.max_speed_hz = self._spi_freq
         self.SPI.mode = 0b00
 
-        # Initialize joystick pins like lcd_hat (INPUT with pull_up)
         self.GPIO_KEY_UP_PIN = DigitalInputDevice(JOYSTICK_PINS['up'], pull_up=True)
         self.GPIO_KEY_DOWN_PIN = DigitalInputDevice(JOYSTICK_PINS['down'], pull_up=True)
         self.GPIO_KEY_LEFT_PIN = DigitalInputDevice(JOYSTICK_PINS['left'], pull_up=True)
         self.GPIO_KEY_RIGHT_PIN = DigitalInputDevice(JOYSTICK_PINS['right'], pull_up=True)
         self.GPIO_KEY_PRESS_PIN = DigitalInputDevice(JOYSTICK_PINS['press'], pull_up=True)
-        self.GPIO_KEY1_PIN = DigitalInputDevice(JOYSTICK_PINS['key1'], pull_up=True)
-        self.GPIO_KEY2_PIN = DigitalInputDevice(JOYSTICK_PINS['key2'], pull_up=True)
-        self.GPIO_KEY3_PIN = DigitalInputDevice(JOYSTICK_PINS['key3'], pull_up=True)
-
         return True
 
     def init(self) -> bool:
@@ -230,41 +223,21 @@ class ST7789:
         if self.GPIO_BL_PIN:
             self.GPIO_BL_PIN.value = 1.0 if on else 0.0
 
+    def _backlight(self, on: bool):
+        if self.GPIO_BL_PIN:
+            if on: self.GPIO_BL_PIN.on()
+            else: self.GPIO_BL_PIN.off()
+
     def fade_out(self, steps: int = 20, step_delay_ms: int = 50):
-        """Gradually fade out backlight."""
-        if not getattr(self, 'GPIO_BL_PIN', None):
-            return
-        
-        current = self.GPIO_BL_PIN.value
-        start = int(current * 100)
-        step = max(1, start // steps)
-        
-        # Исправлено: шаг в цикле range должен быть отрицательным
-        for duty in range(start, -1, -step):
-            self.bl_DutyCycle(duty)
-            time.sleep(step_delay_ms / 1000.0)
-            
+        # Затухания больше нет, просто выключаем
         self._backlight(False)
 
     def fade_in(self, target_duty: int = 50, steps: int = 20, step_delay_ms: int = 50):
-        """Gradually fade in backlight."""
-        if not self.GPIO_BL_PIN:
-            return
-        self._backlight(False)
-        for duty in range(1, target_duty + 1, max(1, target_duty // steps)):
-            self.bl_DutyCycle(duty)
-            time.sleep(step_delay_ms / 1000.0)
-
-    def digital_read(self, pin):
-        """Read pin value like lcd_hat. Returns 0 when pressed (active LOW)."""
-        if pin:
-            return 0 if pin.value else 1 # Invert: True=not pressed, False=pressed
-        return 1
+        # Затухания больше нет, просто включаем
+        self._backlight(True)
 
     def bl_DutyCycle(self, duty: int):
-        """Set backlight duty cycle (0-100)."""
-        if self.GPIO_BL_PIN:
-            self.GPIO_BL_PIN.value = duty / 100.0
+        self._backlight(duty > 0)
 
     def clear(self, color=(0, 0, 0)):
         """Clear display with color (RGB tuple)."""
