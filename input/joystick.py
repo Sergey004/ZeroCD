@@ -1,5 +1,5 @@
 """
-Joystick для Waveshare ST7789 LCD HAT
+Joystick handler for Waveshare ST7789 LCD HAT
 """
 import threading
 import time
@@ -28,13 +28,10 @@ class Joystick:
         self.last_direction = Direction.NONE
         self.last_trigger = {d: 0.0 for d in Direction}
         
-        # Verify display has required attributes
         required_pins =['GPIO_KEY_UP_PIN', 'GPIO_KEY_DOWN_PIN', 'GPIO_KEY_LEFT_PIN', 
                       'GPIO_KEY_RIGHT_PIN', 'GPIO_KEY_PRESS_PIN']
-        missing =[]
-        for pin in required_pins:
-            if not hasattr(self.disp, pin) or getattr(self.disp, pin) is None:
-                missing.append(pin)
+        
+        missing =[pin for pin in required_pins if not hasattr(self.disp, pin) or getattr(self.disp, pin) is None]
         
         if missing:
             self.logger.error(f"Missing joystick pins in display: {missing}")
@@ -43,15 +40,21 @@ class Joystick:
         self.logger.info("Joystick initialized successfully")
 
     def _is_pressed(self, pin_attr: str) -> bool:
-        """Check if button is pressed"""
+        """Самый надежный способ проверки нажатия кнопки"""
         try:
-            pin = getattr(self.disp, pin_attr)
+            pin = getattr(self.disp, pin_attr, None)
             if pin is None:
                 return False
-            value = self.disp.digital_read(pin)
-            # ИСПРАВЛЕНО: Кнопки подтянуты к VCC (pull-up), 
-            # поэтому 0 означает что кнопка нажата, 1 - отпущена.
-            return value == 0
+                
+            # Идеальный вариант (gpiozero.Button)
+            if hasattr(pin, 'is_pressed'):
+                return pin.is_pressed
+                
+            # Запасной вариант
+            if hasattr(pin, 'value'):
+                return not pin.value
+                
+            return False
         except Exception as e:
             self.logger.debug(f"Error reading {pin_attr}: {e}")
             return False
@@ -71,26 +74,21 @@ class Joystick:
             direction = self._get_direction()
             now = time.time()
             
-            # Only trigger on new press with cooldown
             if direction != Direction.NONE:
                 cooldown = 0.3 if direction == Direction.PRESS else 0.15
                 
                 if direction != self.last_direction or (now - self.last_trigger[direction] > cooldown):
-                    self.logger.debug(f"Button triggered: {direction.value}")
                     if self.callback:
                         try:
                             self.callback(direction)
                         except Exception as e:
                             self.logger.error(f"Error in joystick callback: {e}")
-                            import traceback
-                            self.logger.error(traceback.format_exc())
                     self.last_trigger[direction] = now
             
             self.last_direction = direction
             time.sleep(1.0 / JOYSTICK_POLL_RATE)
 
     def start_polling(self, callback: Callable[[Direction], None] = None):
-        """Start background polling with callback."""
         if callback:
             self.callback = callback
         self.running = True
@@ -99,7 +97,6 @@ class Joystick:
         self.logger.info("Joystick polling thread started")
 
     def stop(self):
-        """Stop polling."""
         self.running = False
         if self._thread:
             self._thread.join(timeout=1.0)
