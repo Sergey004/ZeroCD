@@ -1,9 +1,8 @@
 """
 ZeroCD WebUI Server
-Flask web interface for ISO management and WiFi configuration
+Flask web interface for ISO/IMG management and WiFi configuration
 """
 import os
-import json
 import time
 import threading
 from flask import Flask, render_template, request, jsonify, send_from_directory, redirect, url_for
@@ -16,22 +15,18 @@ from config import (
     WEBUI_HOST,
     WEBUI_SECRET_KEY,
     POPULAR_ISOS,
-    is_gadget_mode,
-    ZEROCD_DATA_DIR,
-    ensure_data_dir
+    ZEROCD_DATA_DIR
 )
 from usb.iso_manager import ISOManager
 from net.wifi import get_wifi_manager
 from net.captive import get_captive_portal
 from system.logger import get_logger
 
-
 app = Flask(__name__, template_folder='templates', static_folder='static')
 app.secret_key = WEBUI_SECRET_KEY
 
 @app.template_filter('format_size')
 def format_size_filter(bytes_size):
-    """Format bytes to human readable size."""
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
         if bytes_size < 1024.0:
             return f"{bytes_size:.1f} {unit}"
@@ -46,25 +41,10 @@ captive_portal = get_captive_portal()
 
 download_tasks: Dict[str, dict] = {}
 
-
-@app.before_request
-def check_gadget_mode():
-    """Block WebUI in USB Gadget mode to save power."""
-    if is_gadget_mode() and request.endpoint not in ['static', 'captive']:
-        return """
-        <html><head><title>ZeroCD - Unavailable</title></head>
-        <body style="font-family: sans-serif; padding: 40px; text-align: center;">
-        <h1>WebUI Unavailable</h1>
-        <p>In USB Gadget mode (CD-ROM emulation) WebUI is disabled to save power.</p>
-        <p>Disconnect USB cable and reboot device to use WebUI.</p>
-        <a href="/">Go Back</a>
-        </body></html>
-        """, 503
-
+# МЫ УДАЛИЛИ БЛОКИРОВКУ GADGET MODE! Теперь WebUI работает всегда.
 
 @app.route('/')
 def index():
-    """Main page - ISO list."""
     isos = iso_manager.list_isos()
     total_size = sum(
         os.path.getsize(os.path.join(ISO_DIR, f)) 
@@ -72,7 +52,6 @@ def index():
     )
     
     disk_total, disk_used, disk_free = get_disk_usage()
-    
     wifi_status = wifi_manager.get_status()
     wifi_ip = wifi_manager.get_ip()
     
@@ -85,13 +64,11 @@ def index():
         wifi_connected=wifi_status.value == "connected",
         wifi_ssid=wifi_manager.get_current_ssid(),
         wifi_ip=wifi_ip,
-        gadget_mode=is_gadget_mode()
+        gadget_mode=False # Больше не пугаем пользователя баннерами
     )
-
 
 @app.route('/upload', methods=['GET', 'POST'])
 def upload():
-    """Upload ISO file from computer."""
     if request.method == 'POST':
         if 'file' not in request.files:
             return jsonify({'error': 'No file selected'}), 400
@@ -100,56 +77,39 @@ def upload():
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
         
-        if not file.filename.endswith('.iso'):
-            return jsonify({'error': 'Only .iso files allowed'}), 400
+        # Разрешаем и .iso, и .img
+        if not (file.filename.lower().endswith('.iso') or file.filename.lower().endswith('.img')):
+            return jsonify({'error': 'Only .iso and .img files allowed'}), 400
         
         filename = secure_filename(file.filename)
         filepath = os.path.join(ISO_DIR, filename)
-        
         os.makedirs(ISO_DIR, exist_ok=True)
         
         file.save(filepath)
         logger.info(f"Uploaded: {filename}")
-        
         return jsonify({'success': True, 'filename': filename})
     
-    return render_template('upload.html', gadget_mode=is_gadget_mode())
-
+    return render_template('upload.html', gadget_mode=False)
 
 @app.route('/download')
 def download_page():
-    """Download ISO from URL page."""
-    return render_template('download.html', 
-        popular_isos=POPULAR_ISOS,
-        gadget_mode=is_gadget_mode()
-    )
-
+    return render_template('download.html', popular_isos=POPULAR_ISOS, gadget_mode=False)
 
 @app.route('/api/download', methods=['POST'])
 def start_download():
-    """Start downloading ISO from URL."""
     data = request.get_json()
     url = data.get('url', '').strip()
     name = data.get('name', 'download.iso')
     
-    if not url:
-        return jsonify({'error': 'URL required'}), 400
-    
-    if not name.endswith('.iso'):
-        name += '.iso'
+    if not url: return jsonify({'error': 'URL required'}), 400
     
     filename = secure_filename(name)
     filepath = os.path.join(ISO_DIR, filename)
-    
     task_id = f"download_{int(time.time())}"
+    
     download_tasks[task_id] = {
-        'url': url,
-        'filename': filename,
-        'filepath': filepath,
-        'progress': 0,
-        'speed': 0,
-        'status': 'starting',
-        'thread': None
+        'url': url, 'filename': filename, 'filepath': filepath,
+        'progress': 0, 'speed': 0, 'status': 'starting', 'thread': None
     }
     
     def download_task(task_id, url, filepath):
@@ -157,7 +117,6 @@ def start_download():
             import requests
             response = requests.get(url, stream=True, timeout=30)
             total_size = int(response.headers.get('content-length', 0))
-            
             download_tasks[task_id]['status'] = 'downloading'
             download_tasks[task_id]['total'] = total_size
             
@@ -165,16 +124,13 @@ def start_download():
                 downloaded = 0
                 last_time = time.time()
                 last_downloaded = 0
-                
                 for chunk in response.iter_content(chunk_size=8192):
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
-                        
                         current_time = time.time()
                         if current_time - last_time >= 1:
-                            speed = downloaded - last_downloaded
-                            download_tasks[task_id]['speed'] = speed
+                            download_tasks[task_id]['speed'] = downloaded - last_downloaded
                             download_tasks[task_id]['progress'] = downloaded
                             download_tasks[task_id]['percent'] = int(downloaded/total_size*100) if total_size > 0 else 0
                             last_time = current_time
@@ -183,207 +139,129 @@ def start_download():
             download_tasks[task_id]['status'] = 'complete'
             download_tasks[task_id]['progress'] = total_size
             download_tasks[task_id]['percent'] = 100
-            
         except Exception as e:
             download_tasks[task_id]['status'] = 'error'
             download_tasks[task_id]['error'] = str(e)
-            if os.path.exists(filepath):
-                os.remove(filepath)
+            if os.path.exists(filepath): os.remove(filepath)
     
-    thread = threading.Thread(target=download_task, args=(task_id, url, filepath))
-    thread.daemon = True
+    thread = threading.Thread(target=download_task, args=(task_id, url, filepath), daemon=True)
     thread.start()
     download_tasks[task_id]['thread'] = thread
-    
     return jsonify({'success': True, 'task_id': task_id})
-
 
 @app.route('/api/download/status')
 def download_status():
-    """Get download status."""
     return jsonify(download_tasks)
-
 
 @app.route('/settings')
 def settings():
-    """WiFi settings page."""
     wifi_status = wifi_manager.get_status()
     wifi_ip = wifi_manager.get_ip()
     ap_config = wifi_manager.get_ap_config()
     captive_status = captive_portal.get_status()
-    
     return render_template('settings.html',
-        wifi_status=wifi_status.value,
-        wifi_connected=wifi_status.value == "connected",
-        wifi_ssid=wifi_manager.get_current_ssid(),
-        wifi_ip=wifi_ip,
-        ap_ssid=ap_config['ssid'],
-        ap_password=ap_config['password'],
-        ap_ip=ap_config['ip'],
-        captive_running=captive_status['running'],
-        gadget_mode=is_gadget_mode()
+        wifi_status=wifi_status.value, wifi_connected=wifi_status.value == "connected",
+        wifi_ssid=wifi_manager.get_current_ssid(), wifi_ip=wifi_ip,
+        ap_ssid=ap_config['ssid'], ap_password=ap_config['password'], ap_ip=ap_config['ip'],
+        captive_running=captive_status['running'], gadget_mode=False
     )
-
 
 @app.route('/api/wifi/status')
 def wifi_status_api():
-    """Get WiFi status JSON."""
     status = wifi_manager.get_status()
     return jsonify({
-        'status': status.value,
-        'connected': status.value == "connected",
-        'ssid': wifi_manager.get_current_ssid(),
-        'ip': wifi_manager.get_ip(),
+        'status': status.value, 'connected': status.value == "connected",
+        'ssid': wifi_manager.get_current_ssid(), 'ip': wifi_manager.get_ip(),
         'has_wifi': wifi_manager.has_wifi_support()
     })
 
-
 @app.route('/api/wifi/connect', methods=['POST'])
 def wifi_connect():
-    """Connect to WiFi network."""
     data = request.get_json()
     ssid = data.get('ssid', '').strip()
     password = data.get('password', '').strip()
-    
-    if not ssid:
-        return jsonify({'error': 'SSID required'}), 400
-    
+    if not ssid: return jsonify({'error': 'SSID required'}), 400
     wifi_manager.save_network(ssid, password)
-    
-    if wifi_manager.connect(ssid):
-        return jsonify({'success': True, 'ssid': ssid})
-    else:
-        return jsonify({'error': 'Connection failed'}), 500
-
+    if wifi_manager.connect(ssid): return jsonify({'success': True, 'ssid': ssid})
+    else: return jsonify({'error': 'Connection failed'}), 500
 
 @app.route('/api/wifi/disconnect', methods=['POST'])
 def wifi_disconnect():
-    """Disconnect from WiFi."""
     wifi_manager.disconnect()
     return jsonify({'success': True})
 
-
 @app.route('/api/wifi/forget', methods=['POST'])
 def wifi_forget():
-    """Forget saved network."""
     wifi_manager.forget_network()
     return jsonify({'success': True})
 
-
 @app.route('/api/wifi/scan')
 def wifi_scan():
-    """Scan for available networks."""
-    networks = wifi_manager.scan()
-    return jsonify({'networks': networks})
-
-
-@app.route('/api/captive/start', methods=['POST'])
-def captive_start():
-    """Start captive portal (AP mode)."""
-    if captive_portal.start():
-        return jsonify({'success': True})
-    return jsonify({'error': 'Failed to start'}), 500
-
-
-@app.route('/api/captive/stop', methods=['POST'])
-def captive_stop():
-    """Stop captive portal."""
-    captive_portal.stop()
-    return jsonify({'success': True})
-
-
-@app.route('/api/captive/status')
-def captive_status():
-    """Get captive portal status."""
-    return jsonify(captive_portal.get_status())
-
+    return jsonify({'networks': wifi_manager.scan()})
 
 @app.route('/api/isos')
 def api_isos():
-    """Get ISO list JSON."""
     isos = iso_manager.list_isos()
-    result = []
+    result =[]
     for iso in isos:
         path = iso_manager.get_iso_path(iso)
         size = os.path.getsize(path) if path and os.path.exists(path) else 0
-        result.append({
-            'name': iso,
-            'size': format_size(size),
-            'size_bytes': size
-        })
+        result.append({'name': iso, 'size': format_size(size), 'size_bytes': size})
     return jsonify(result)
-
 
 @app.route('/api/delete', methods=['POST'])
 def api_delete():
-    """Delete ISO file."""
-    data = request.get_json()
-    filename = data.get('filename', '')
-    
+    filename = request.get_json().get('filename', '')
     path = iso_manager.get_iso_path(filename)
     if path and os.path.exists(path):
         os.remove(path)
         return jsonify({'success': True})
-    
     return jsonify({'error': 'File not found'}), 404
-
 
 @app.route('/api/select', methods=['POST'])
 def api_select():
-    """Select active ISO."""
-    data = request.get_json()
-    filename = data.get('filename', '')
-    
+    # Эта ручка позволяет выбрать образ прямо с телефона!
+    filename = request.get_json().get('filename', '')
     path = iso_manager.get_iso_path(filename)
     if path:
-        return jsonify({'success': True, 'path': path})
-    
-    return jsonify({'error': 'File not found'}), 404
-
+        # Пытаемся сообщить главному приложению, что надо переключить диск
+        try:
+            import main
+            if hasattr(main, 'app') and main.app:
+                main.app.on_iso_selected(filename)
+                return jsonify({'success': True, 'path': path})
+        except: pass
+    return jsonify({'error': 'Failed to select image'}), 404
 
 @app.route('/api/disk')
 def api_disk():
-    """Get disk usage."""
     total, used, free = get_disk_usage()
-    return jsonify({
-        'total': total,
-        'used': used,
-        'free': free,
-        'percent': int(used/total*100) if total > 0 else 0
-    })
-
+    return jsonify({'total': total, 'used': used, 'free': free, 'percent': int(used/total*100) if total > 0 else 0})
 
 def format_size(bytes_size: int) -> str:
-    """Format bytes to human readable size."""
-    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-        if bytes_size < 1024.0:
-            return f"{bytes_size:.1f} {unit}"
+    for unit in['B', 'KB', 'MB', 'GB', 'TB']:
+        if bytes_size < 1024.0: return f"{bytes_size:.1f} {unit}"
         bytes_size /= 1024.0
     return f"{bytes_size:.1f} PB"
 
-
 def get_disk_usage():
-    """Get disk usage for ISO storage."""
     try:
         stat = os.statvfs(ISO_DIR)
         total = stat.f_blocks * stat.f_frsize
         free = stat.f_bavail * stat.f_frsize
         used = total - free
         return total, used, free
-    except:
-        return 0, 0, 0
-
+    except: return 0, 0, 0
 
 def start_webui(host: str = WEBUI_HOST, port: int = WEBUI_PORT, debug: bool = False):
-    """Start WebUI server."""
-    logger.info(f"Starting WebUI on {host}:{port}")
-    app.run(host=host, port=port, debug=debug, threaded=True)
-
-
-def stop_webui():
-    """Stop WebUI server (flask doesn't have native stop, use in combination with atexit)."""
-    pass
-
+    """Start WebUI server. (Вызывается из main.py в фоновом потоке)"""
+    # Отключаем спам в консоль от Flask
+    import logging
+    log = logging.getLogger('werkzeug')
+    log.setLevel(logging.ERROR)
+    
+    logger.info(f"Starting WebUI on http://{host}:{port}")
+    app.run(host=host, port=port, debug=debug, use_reloader=False)
 
 if __name__ == '__main__':
     start_webui()

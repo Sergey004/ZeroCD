@@ -28,6 +28,7 @@ else:
     from usb.iso_manager import ISOManager
     from net.wifi import WiFiManager
     from usb.gadget import GadgetManager
+    
 
 
 class ZeroCDApp:
@@ -116,6 +117,19 @@ class ZeroCDApp:
         if self.iso_list:
             self.on_iso_selected(self.iso_list[0])
             
+        # === ЗАПУСКАЕМ WEB UI В ФОНОВОМ ПОТОКЕ ===
+        if not USE_PC_EMULATION:
+            try:
+                import threading
+                from web.server import start_webui
+                # Запускаем Flask в отдельном потоке, чтобы он не заблокировал меню и джойстик
+                web_thread = threading.Thread(target=start_webui, daemon=True)
+                web_thread.start()
+                self.logger.info("WebUI background thread started")
+            except Exception as e:
+                self.logger.error(f"Failed to start WebUI: {e}")
+        # ========================================
+
         return True
         
 

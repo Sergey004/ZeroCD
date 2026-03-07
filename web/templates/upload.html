@@ -60,7 +60,7 @@
                 <button class="btn" onclick="document.getElementById('fileInput').click()">Choose File</button>
             </div>
             
-            <input type="file" id="fileInput" accept=".iso">
+            <input type="file" id="fileInput" accept=".iso,.img">
             
             <div class="progress-container" id="progress">
                 <div class="progress-bar">
@@ -99,8 +99,9 @@
         });
         
         function uploadFile(file) {
-            if (!file.name.endsWith('.iso')) {
-                showResult('Only .iso files allowed!', 'error');
+            const name = file.name.toLowerCase();
+            if (!name.endsWith('.iso') && !name.endsWith('.img')) {
+                showResult('Only .iso and .img files allowed!', 'error');
                 return;
             }
             
