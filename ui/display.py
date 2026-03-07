@@ -197,7 +197,8 @@ class ST7789:
         self._command(0x11)
         self._command(0x29)
 
-        self._backlight(True)
+        # Подсветка выключена, ждем пока main.py вызовет плавный fade_in
+        self.bl_DutyCycle(0)
 
         self.image = Image.new("RGB", (self.width, self.height), "BLACK")
         self.draw = ImageDraw.Draw(self.image)
@@ -231,13 +232,18 @@ class ST7789:
 
     def fade_out(self, steps: int = 20, step_delay_ms: int = 50):
         """Gradually fade out backlight."""
-        if not self.GPIO_BL_PIN:
+        if not getattr(self, 'GPIO_BL_PIN', None):
             return
+        
         current = self.GPIO_BL_PIN.value
         start = int(current * 100)
-        for duty in range(start, 0, max(1, start // steps)):
+        step = max(1, start // steps)
+        
+        # Исправлено: шаг в цикле range должен быть отрицательным
+        for duty in range(start, -1, -step):
             self.bl_DutyCycle(duty)
             time.sleep(step_delay_ms / 1000.0)
+            
         self._backlight(False)
 
     def fade_in(self, target_duty: int = 50, steps: int = 20, step_delay_ms: int = 50):
@@ -313,7 +319,7 @@ class ST7789:
         status = f"Wi-Fi:{'ON' if wifi_on else 'OFF'} MTP:{'ON' if mtp_on else 'OFF'}"
         char_width = 10
         text_width = len(status) * char_width
-        self._draw_text(240 - text_width - 5, 6, status, ST7789_COLORS['WHITE'])
+        self._draw_text(240 - text_width - 5, 6, status, ST7789_COLORS['BLACK'])
 
         if active_iso:
             self.draw.rectangle((0, 24, 240, 40), fill=ST7789_COLORS['BLUE'])
@@ -350,7 +356,7 @@ class ST7789:
             if is_active:
                 self._draw_text(200, y + 8, "*", ST7789_COLORS['YELLOW'])
 
-        self._draw_text(5, 220, "w/s:nav Enter:sel d:Wi-Fi a:MTP", ST7789_COLORS['YELLOW'])
+        #self._draw_text(5, 220, "w/s:nav Enter:sel d:Wi-Fi a:MTP", ST7789_COLORS['YELLOW'])
         self._update()
 
     def _update(self):

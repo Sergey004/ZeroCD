@@ -67,7 +67,7 @@ class ZeroCDApp:
                 self.logger.error("Failed to initialize display")
                 return False
             
-            # --- Устанавливаем яркость 50% ---
+           # --- Устанавливаем яркость 50% ---
             import RPi.GPIO as GPIO
             bl_pin = 24
             if hasattr(self.display, 'disp') and hasattr(self.display.disp, '_bl'):

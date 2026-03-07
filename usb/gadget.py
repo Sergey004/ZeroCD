@@ -5,6 +5,7 @@ Uses configfs to configure USB gadget on Raspberry Pi Zero
 import os
 import subprocess
 import time
+import threading
 import traceback
 from enum import Enum
 from typing import Optional, Dict, Any
@@ -28,49 +29,40 @@ class GadgetManager:
         self._udc = None
         self._current_mode_is_cdrom = True
         
-        # Генерируем постоянные MAC-адреса на основе серийника Raspberry Pi
-        self._generate_mac_addresses()
+        # Генерируем постоянные MAC и Серийник (чтобы Windows не сходила с ума)
+        self._generate_hardware_ids()
 
-    def _generate_mac_addresses(self):
-        """Generates stable MAC addresses based on Pi's Serial Number (like ethernet-configfs.sh)"""
+    def _generate_hardware_ids(self):
+        self._serial = "zerocd-123456"
+        self._host_mac_rndis = "02:00:00:00:00:01"
+        self._dev_mac_rndis  = "06:00:00:00:00:02"
+        self._host_mac_ecm   = "12:00:00:00:00:03"
+        self._dev_mac_ecm    = "16:00:00:00:00:04"
+        
         try:
             with open('/proc/cpuinfo', 'r') as f:
                 for line in f:
                     if line.startswith('Serial'):
                         serial = line.split(':')[1].strip()
-                        # Добиваем нулями слева до 16 символов
-                        padded = serial.zfill(16)
-                        # Берем последние 10 символов
-                        last_10 = padded[-10:]
-                        # Разбиваем на пары с двоеточиями
+                        self._serial = serial.zfill(16)
+                        last_10 = self._serial[-10:]
                         pairs =[last_10[i:i+2] for i in range(0, 10, 2)]
                         base_mac = ":" + ":".join(pairs)
                         
-                        # RNDIS (Windows)
                         self._host_mac_rndis = "02" + base_mac
                         self._dev_mac_rndis  = "06" + base_mac
-                        
-                        # ECM (Mac/Linux)
                         self._host_mac_ecm   = "12" + base_mac
                         self._dev_mac_ecm    = "16" + base_mac
-                        
-                        self.logger.info(f"Generated stable MAC based on serial: {serial}")
-                        return
+                        self.logger.info(f"Hardware IDs generated from Serial: {serial}")
+                        break
         except Exception as e:
-            self.logger.warning(f"Could not read Pi Serial for MAC: {e}")
-            
-        # Запасные MAC-адреса, если серийник прочитать не удалось
-        self._host_mac_rndis = "02:00:00:00:00:01"
-        self._dev_mac_rndis  = "06:00:00:00:00:02"
-        self._host_mac_ecm   = "12:00:00:00:00:03"
-        self._dev_mac_ecm    = "16:00:00:00:00:04"
+            self.logger.warning(f"Could not read Pi Serial: {e}")
 
     def _check_module(self, module_name):
         try:
             result = subprocess.run(['lsmod'], capture_output=True, text=True)
             return module_name in result.stdout
-        except:
-            return False
+        except: return False
 
     def _load_module(self, module_name):
         self.logger.info(f"Loading module: {module_name}")
@@ -78,20 +70,15 @@ class GadgetManager:
             subprocess.run(['modprobe', module_name], check=True)
             time.sleep(0.5)
             return True
-        except Exception as e:
-            self.logger.error(f"Failed to load {module_name}: {e}")
-            return False
+        except: return False
 
     def _mount_configfs(self):
         config_path = "/sys/kernel/config"
-        if os.path.ismount(config_path):
-            return True
+        if os.path.ismount(config_path): return True
         try:
             subprocess.run(['mount', '-t', 'configfs', 'none', config_path], check=True)
             return True
-        except Exception as e:
-            self.logger.error(f"Failed to mount configfs: {e}")
-            return False
+        except: return False
 
     def _get_udc(self) -> Optional[str]:
         try:
@@ -107,7 +94,6 @@ class GadgetManager:
         if not os.path.exists(gadget_path): return True
         
         self.logger.info("Cleaning up old USB structure...")
-        
         udc_file = f"{gadget_path}/UDC"
         if os.path.exists(udc_file):
             try:
@@ -138,13 +124,9 @@ class GadgetManager:
                         os.rmdir(fp)
                 except: pass
 
-        try: os.unlink(f"{gadget_path}/os_desc/c.1")
-        except: pass
-        try: os.rmdir(f"{gadget_path}/strings/0x409")
-        except: pass
-        try: os.rmdir(gadget_path)
-        except: pass
-        
+        for p in[f"{gadget_path}/os_desc/c.1", f"{gadget_path}/strings/0x409", gadget_path]:
+            try: os.unlink(p) if os.path.islink(p) else os.rmdir(p)
+            except: pass
         return True
 
     def _write_file(self, path: str, content: str, retries=3):
@@ -180,19 +162,33 @@ class GadgetManager:
             os.makedirs(f'{gadget_path}/strings/0x409', exist_ok=True)
             self._write_file(f'{gadget_path}/strings/0x409/manufacturer', 'ZeroCD')
             self._write_file(f'{gadget_path}/strings/0x409/product', 'CD + Ethernet')
-            
-            # Уникальный серийный номер для предотвращения кэширования
-            unique_sn = f'zerocd-{int(time.time())}'
-            self._write_file(f'{gadget_path}/strings/0x409/serialnumber', unique_sn)
+            self._write_file(f'{gadget_path}/strings/0x409/serialnumber', self._serial)
 
             config_path = f'{gadget_path}/configs/{self.config_name}'
             os.makedirs(config_path, exist_ok=True)
             os.makedirs(f'{config_path}/strings/0x409', exist_ok=True)
             self._write_file(f'{config_path}/strings/0x409/configuration', 'CD-ROM + LAN')
-            
-            # Устанавливаем MaxPower (250 * 2mA = 500mA) как в вашем скрипте
             self._write_file(f'{config_path}/MaxPower', '250')
 
+            # Сначала линкуем RNDIS (помогает Windows)
+            rndis_path = f'{gadget_path}/functions/rndis.usb0'
+            os.makedirs(rndis_path, exist_ok=True)
+            self._write_file(f'{rndis_path}/host_addr', self._host_mac_rndis)
+            self._write_file(f'{rndis_path}/dev_addr', self._dev_mac_rndis)
+            rndis_os_desc = f'{rndis_path}/os_desc/interface.rndis'
+            if os.path.exists(rndis_os_desc):
+                self._write_file(f'{rndis_os_desc}/compatible_id', 'RNDIS')
+                self._write_file(f'{rndis_os_desc}/sub_compatible_id', '5162001')
+            os.symlink(rndis_path, f'{config_path}/rndis.usb0')
+
+            # Затем ECM (Для Mac/Linux)
+            ecm_path = f'{gadget_path}/functions/ecm.usb0'
+            os.makedirs(ecm_path, exist_ok=True)
+            self._write_file(f'{ecm_path}/host_addr', self._host_mac_ecm)
+            self._write_file(f'{ecm_path}/dev_addr', self._dev_mac_ecm)
+            os.symlink(ecm_path, f'{config_path}/ecm.usb0')
+
+            # Наконец Mass Storage
             ms_path = f'{gadget_path}/functions/mass_storage.usb0'
             os.makedirs(ms_path, exist_ok=True)
             time.sleep(0.1)
@@ -212,28 +208,9 @@ class GadgetManager:
                 self._write_file(f'{lun0_path}/ro', '0')
                 self._write_file(f'{lun0_path}/cdrom', '0')
                 self._write_file(f'{lun0_path}/nofua', '1')
-
             os.symlink(ms_path, f'{config_path}/mass_storage.usb0')
 
-            # --- Network Configuration ---
-            # RNDIS
-            rndis_path = f'{gadget_path}/functions/rndis.usb0'
-            os.makedirs(rndis_path, exist_ok=True)
-            self._write_file(f'{rndis_path}/host_addr', self._host_mac_rndis)
-            self._write_file(f'{rndis_path}/dev_addr', self._dev_mac_rndis)
-            rndis_os_desc = f'{rndis_path}/os_desc/interface.rndis'
-            if os.path.exists(rndis_os_desc):
-                self._write_file(f'{rndis_os_desc}/compatible_id', 'RNDIS')
-                self._write_file(f'{rndis_os_desc}/sub_compatible_id', '5162001')
-            os.symlink(rndis_path, f'{config_path}/rndis.usb0')
-
-            # ECM
-            ecm_path = f'{gadget_path}/functions/ecm.usb0'
-            os.makedirs(ecm_path, exist_ok=True)
-            self._write_file(f'{ecm_path}/host_addr', self._host_mac_ecm)
-            self._write_file(f'{ecm_path}/dev_addr', self._dev_mac_ecm)
-            os.symlink(ecm_path, f'{config_path}/ecm.usb0')
-
+            # Привязываем Windows OS Descriptors
             try: os.symlink(config_path, f'{gadget_path}/os_desc/c.1')
             except: pass
 
@@ -241,6 +218,33 @@ class GadgetManager:
         except Exception as e:
             self.logger.error(f"Gadget structure failed: {e}")
             return False
+
+    def _setup_usb_network_dhcp(self):
+        """Поднимаем интерфейс usb0 и запускаем DHCP для ПК (Mac/Windows)"""
+        def task():
+            time.sleep(1.5) # Ждем, пока ядро создаст usb0 после bind()
+            try:
+                # Назначаем IP самой Малинке
+                subprocess.run(['sudo', 'ip', 'addr', 'flush', 'dev', 'usb0'], check=False, stderr=subprocess.DEVNULL)
+                subprocess.run(['sudo', 'ip', 'addr', 'add', '192.168.7.1/24', 'dev', 'usb0'], check=False, stderr=subprocess.DEVNULL)
+                subprocess.run(['sudo', 'ip', 'link', 'set', 'usb0', 'up'], check=False, stderr=subprocess.DEVNULL)
+
+                # Создаем конфиг для выдачи IP компьютеру
+                conf_path = "/tmp/zerocd_usb_dhcp.conf"
+                with open(conf_path, "w") as f:
+                    f.write("interface=usb0\n")
+                    f.write("dhcp-range=192.168.7.2,192.168.7.2,255.255.255.0,1h\n")
+                    f.write("dhcp-option=3,192.168.7.1\n") # Шлюз
+                    f.write("dhcp-option=6,8.8.8.8,1.1.1.1\n") # DNS
+                
+                # Убиваем старые процессы и запускаем новый dnsmasq
+                subprocess.run(['sudo', 'pkill', '-f', 'zerocd_usb_dhcp.conf'], check=False, stderr=subprocess.DEVNULL)
+                subprocess.run(['sudo', 'dnsmasq', '-C', conf_path], check=False, stderr=subprocess.DEVNULL)
+                self.logger.info("USB DHCP server started (Host will get 192.168.7.2)")
+            except Exception as e:
+                self.logger.error(f"Failed to start USB DHCP: {e}")
+                
+        threading.Thread(target=task, daemon=True).start()
 
     def init(self) -> bool:
         if os.geteuid() != 0: return False
@@ -262,6 +266,9 @@ class GadgetManager:
             udc_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/UDC'
             self._write_file(udc_file, self._udc)
             self.state = GadgetState.ACTIVE
+            
+            # ЗАПУСКАЕМ DHCP СЕРВЕР СРАЗУ ПОСЛЕ ПОДКЛЮЧЕНИЯ КАБЕЛЯ
+            self._setup_usb_network_dhcp()
             return True
         except: return False
 
@@ -283,9 +290,7 @@ class GadgetManager:
             return False
             
         iso_path = os.path.abspath(iso_path)
-        
         if getattr(self, 'current_iso', None) == iso_path:
-            self.logger.info("This image is already mounted. Skipping.")
             return True
             
         is_cdrom = iso_path.lower().endswith('.iso')
@@ -293,32 +298,34 @@ class GadgetManager:
         try:
             needs_rebuild = getattr(self, '_current_mode_is_cdrom', None) != is_cdrom
             was_bound = (self.state == GadgetState.ACTIVE)
-            
-            if was_bound:
-                self.logger.info("Unbinding USB for safe image swap...")
-                self.unbind()
-                time.sleep(1.0)
+            lun0_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.0/file'
             
             if needs_rebuild:
-                self.logger.info(f"Rebuilding USB gadget for {'CD-ROM' if is_cdrom else 'Flash Drive'} mode...")
+                # Если меняем тип (CDROM <-> HDD), придется пересобрать гаджет (сеть на секунду отпадет)
+                if was_bound:
+                    self.logger.info("Unbinding USB for device type swap...")
+                    self.unbind()
+                    time.sleep(1.0)
+                
+                self.logger.info(f"Rebuilding gadget for {'CD-ROM' if is_cdrom else 'HDD'} mode...")
                 if not self._create_gadget_structure(is_cdrom=is_cdrom):
                     return False
                 self._current_mode_is_cdrom = is_cdrom
                 
-            lun0_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.0/file'
-            
-            self.logger.info("Ejecting medium...")
-            self._write_file(lun0_file, '\n')
-            time.sleep(0.5)
-            
-            self.logger.info(f"Inserting medium: {iso_path}")
-            self._write_file(lun0_file, iso_path)
-            time.sleep(0.5)
-            
-            if was_bound:
-                self.logger.info("Rebinding USB...")
-                self.bind()
-                time.sleep(1.0)
+                self._write_file(lun0_file, iso_path)
+                
+                if was_bound:
+                    self.bind()
+                    time.sleep(1.0)
+            else:
+                # Если тип тот же, просто выплевываем диск "НА ГОРЯЧУЮ", не обрывая RNDIS/ECM сеть!
+                self.logger.info("Ejecting medium...")
+                self._write_file(lun0_file, '\n')
+                time.sleep(0.8)
+                
+                self.logger.info(f"Inserting new medium: {iso_path}")
+                self._write_file(lun0_file, iso_path)
+                time.sleep(0.5)
             
             self.current_iso = iso_path
             self.logger.info("Swap complete!")
@@ -326,8 +333,6 @@ class GadgetManager:
             
         except Exception as e:
             self.logger.error(f"Failed to set image: {e}")
-            import traceback
-            self.logger.error(traceback.format_exc())
             return False
 
     def shutdown(self):
@@ -335,9 +340,4 @@ class GadgetManager:
         self._safe_cleanup_gadget()
 
     def get_status(self) -> Dict[str, Any]:
-        return {
-            'state': self.state.value,
-            'current_iso': self.current_iso,
-            'udc': self._udc,
-            'functions': ['mass_storage']
-        }
+        return {'state': self.state.value, 'current_iso': self.current_iso, 'udc': self._udc, 'functions': ['mass_storage']}
