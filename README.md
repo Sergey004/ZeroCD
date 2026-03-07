@@ -9,10 +9,10 @@ DIY USB CD-ROM and LAN adapter for Raspberry Pi Zero 2 W
 ## Features
 
 - **USB Gadget Mode** - CD-ROM emulation via USB
-- **USB Ethernet** - Network adapter via USB (RNDIS)
+- **USB Ethernet** - Network adapter via USB (RNDIS) (WIP)
 - **1.3" ST7789 LCD** - Menu and status display
-- **WiFi Management** - ISO upload via WebUI
-- **Captive Portal** - WiFi setup without network connection
+- **WiFi Management** - ISO upload via WebUI (WIP)
+- **Captive Portal** - WiFi setup without network connection (WIP)
 
 ## Requirements
 
