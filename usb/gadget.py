@@ -237,23 +237,33 @@ class GadgetManager:
                 subprocess.run(['sudo', 'ip', 'addr', 'add', '192.168.7.1/24', 'dev', 'usb0'], stderr=subprocess.DEVNULL)
                 subprocess.run(['sudo', 'ip', 'link', 'set', 'usb0', 'up'], stderr=subprocess.DEVNULL)
 
+                # === ВКЛЮЧАЕМ РАЗДАЧУ ИНТЕРНЕТА (NAT / РОУТИНГ) ===
+                # 1. Разрешаем ядру пересылать пакеты
+                subprocess.run(['sudo', 'sysctl', '-w', 'net.ipv4.ip_forward=1'], stderr=subprocess.DEVNULL)
+                # 2. Маскируем трафик с USB так, будто он идет с Wi-Fi малинки
+                subprocess.run(['sudo', 'iptables', '-t', 'nat', '-A', 'POSTROUTING', '-o', 'wlan0', '-j', 'MASQUERADE'], stderr=subprocess.DEVNULL)
+                # 3. Разрешаем двусторонний обмен данными между usb0 и wlan0
+                subprocess.run(['sudo', 'iptables', '-A', 'FORWARD', '-i', 'wlan0', '-o', 'usb0', '-m', 'state', '--state', 'RELATED,ESTABLISHED', '-j', 'ACCEPT'], stderr=subprocess.DEVNULL)
+                subprocess.run(['sudo', 'iptables', '-A', 'FORWARD', '-i', 'usb0', '-o', 'wlan0', '-j', 'ACCEPT'], stderr=subprocess.DEVNULL)
+                # ==================================================
+
                 # Создаем конфиг для выдачи IP компьютеру
                 conf_path = "/tmp/zerocd_usb_dhcp.conf"
                 with open(conf_path, "w") as f:
-                    f.write("port=0\n")  # КРИТИЧНО: Отключает DNS, предотвращая ошибку занятого 53 порта!
+                    f.write("port=0\n")  # Отключает DNS, предотвращая ошибку занятого 53 порта
                     f.write("interface=usb0\n")
                     f.write("dhcp-range=192.168.7.2,192.168.7.2,255.255.255.0,1h\n")
                     f.write("dhcp-option=3,192.168.7.1\n") # Шлюз
-                    f.write("dhcp-option=6,8.8.8.8\n")     # Публичный DNS
+                    f.write("dhcp-option=6,8.8.8.8,1.1.1.1\n") # Публичный DNS
                 
                 # Запускаем новый dnsmasq
                 subprocess.run(['sudo', 'dnsmasq', '-C', conf_path], stderr=subprocess.DEVNULL)
-                self.logger.info("USB DHCP server configured successfully!")
+                self.logger.info("USB DHCP & NAT Router configured successfully!")
             except Exception as e:
                 self.logger.error(f"Failed to start USB DHCP: {e}")
                 
         threading.Thread(target=task, daemon=True).start()
-
+        
     def init(self) -> bool:
         if os.geteuid() != 0: return False
         if not self._check_module("dwc2"):
