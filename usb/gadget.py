@@ -29,15 +29,13 @@ class GadgetManager:
         self._udc = None
         self._current_mode_is_cdrom = True
         
-        # Генерируем постоянные MAC и Серийник (чтобы Windows не сходила с ума)
         self._generate_hardware_ids()
 
     def _generate_hardware_ids(self):
+        """Создает стабильные MAC-адреса и Серийник на основе процессора"""
         self._serial = "zerocd-123456"
-        self._host_mac_rndis = "02:00:00:00:00:01"
-        self._dev_mac_rndis  = "06:00:00:00:00:02"
-        self._host_mac_ecm   = "12:00:00:00:00:03"
-        self._dev_mac_ecm    = "16:00:00:00:00:04"
+        self._host_mac = "02:00:00:00:00:01"
+        self._dev_mac  = "06:00:00:00:00:02"
         
         try:
             with open('/proc/cpuinfo', 'r') as f:
@@ -49,10 +47,9 @@ class GadgetManager:
                         pairs =[last_10[i:i+2] for i in range(0, 10, 2)]
                         base_mac = ":" + ":".join(pairs)
                         
-                        self._host_mac_rndis = "02" + base_mac
-                        self._dev_mac_rndis  = "06" + base_mac
-                        self._host_mac_ecm   = "12" + base_mac
-                        self._dev_mac_ecm    = "16" + base_mac
+                        # ИСПРАВЛЕНИЕ: MAC адрес должен быть строго одинаковым для RNDIS и ECM!
+                        self._host_mac = "02" + base_mac
+                        self._dev_mac  = "06" + base_mac
                         self.logger.info(f"Hardware IDs generated from Serial: {serial}")
                         break
         except Exception as e:
@@ -147,7 +144,8 @@ class GadgetManager:
             os.makedirs(gadget_path, exist_ok=True)
 
             self._write_file(f'{gadget_path}/idVendor', '0x1d6b')
-            self._write_file(f'{gadget_path}/idProduct', '0x0104')
+            # ИСПРАВЛЕНИЕ: Меняем PID на 0x0105, чтобы Мак забыл кэш старых ошибок!
+            self._write_file(f'{gadget_path}/idProduct', '0x0105')
             self._write_file(f'{gadget_path}/bcdDevice', '0x0100')
             self._write_file(f'{gadget_path}/bcdUSB', '0x0200')
 
@@ -170,30 +168,11 @@ class GadgetManager:
             self._write_file(f'{config_path}/strings/0x409/configuration', 'CD-ROM + LAN')
             self._write_file(f'{config_path}/MaxPower', '250')
 
-            # Сначала линкуем RNDIS (помогает Windows)
-            rndis_path = f'{gadget_path}/functions/rndis.usb0'
-            os.makedirs(rndis_path, exist_ok=True)
-            self._write_file(f'{rndis_path}/host_addr', self._host_mac_rndis)
-            self._write_file(f'{rndis_path}/dev_addr', self._dev_mac_rndis)
-            rndis_os_desc = f'{rndis_path}/os_desc/interface.rndis'
-            if os.path.exists(rndis_os_desc):
-                self._write_file(f'{rndis_os_desc}/compatible_id', 'RNDIS')
-                self._write_file(f'{rndis_os_desc}/sub_compatible_id', '5162001')
-            os.symlink(rndis_path, f'{config_path}/rndis.usb0')
-
-            # Затем ECM (Для Mac/Linux)
-            ecm_path = f'{gadget_path}/functions/ecm.usb0'
-            os.makedirs(ecm_path, exist_ok=True)
-            self._write_file(f'{ecm_path}/host_addr', self._host_mac_ecm)
-            self._write_file(f'{ecm_path}/dev_addr', self._dev_mac_ecm)
-            os.symlink(ecm_path, f'{config_path}/ecm.usb0')
-
-            # Наконец Mass Storage
+            # 1. СОЗДАЕМ MASS STORAGE (Дисковод всегда должен быть первым!)
             ms_path = f'{gadget_path}/functions/mass_storage.usb0'
             os.makedirs(ms_path, exist_ok=True)
             time.sleep(0.1)
             self._write_file(f'{ms_path}/stall', '1')
-
             lun0_path = f'{ms_path}/lun.0'
             os.makedirs(lun0_path, exist_ok=True)
             time.sleep(0.2)
@@ -210,6 +189,24 @@ class GadgetManager:
                 self._write_file(f'{lun0_path}/nofua', '1')
             os.symlink(ms_path, f'{config_path}/mass_storage.usb0')
 
+            # 2. СОЗДАЕМ ECM (MAC OS Network)
+            ecm_path = f'{gadget_path}/functions/ecm.usb0'
+            os.makedirs(ecm_path, exist_ok=True)
+            self._write_file(f'{ecm_path}/host_addr', self._host_mac)
+            self._write_file(f'{ecm_path}/dev_addr', self._dev_mac)
+            os.symlink(ecm_path, f'{config_path}/ecm.usb0')
+
+            # 3. СОЗДАЕМ RNDIS (WINDOWS Network)
+            rndis_path = f'{gadget_path}/functions/rndis.usb0'
+            os.makedirs(rndis_path, exist_ok=True)
+            self._write_file(f'{rndis_path}/host_addr', self._host_mac)
+            self._write_file(f'{rndis_path}/dev_addr', self._dev_mac)
+            rndis_os_desc = f'{rndis_path}/os_desc/interface.rndis'
+            if os.path.exists(rndis_os_desc):
+                self._write_file(f'{rndis_os_desc}/compatible_id', 'RNDIS')
+                self._write_file(f'{rndis_os_desc}/sub_compatible_id', '5162001')
+            os.symlink(rndis_path, f'{config_path}/rndis.usb0')
+
             # Привязываем Windows OS Descriptors
             try: os.symlink(config_path, f'{gadget_path}/os_desc/c.1')
             except: pass
@@ -222,7 +219,6 @@ class GadgetManager:
     def _setup_usb_network_dhcp(self):
         """Поднимаем интерфейс usb0 и запускаем DHCP для ПК (Mac/Windows)"""
         def task():
-            # Ждем появления интерфейса usb0
             for _ in range(10):
                 time.sleep(0.5)
                 if os.path.exists('/sys/class/net/usb0'):
@@ -230,40 +226,29 @@ class GadgetManager:
                     
             try:
                 self.logger.info("Configuring USB Network and NAT...")
-                
-                # 1. Назначаем IP самой Малинке
                 os.system("sudo ip addr flush dev usb0")
                 os.system("sudo ip addr add 192.168.7.1/24 dev usb0")
                 os.system("sudo ip link set usb0 up")
 
-                # 2. ВКЛЮЧАЕМ РОУТИНГ ГРУБОЙ СИЛОЙ
-                # Включаем форвардинг в ядре
+                # Включаем роутинг
                 os.system("sudo sysctl -w net.ipv4.ip_forward=1")
-                
-                # Очищаем таблицы NAT и FORWARD от старого мусора
                 os.system("sudo iptables -t nat -F")
                 os.system("sudo iptables -F FORWARD")
-                
-                # Разрешаем вообще любую пересылку пакетов (снимаем блокировки)
                 os.system("sudo iptables -P FORWARD ACCEPT")
-                
-                # Включаем маскарадинг (NAT) из USB в Wi-Fi
                 os.system("sudo iptables -t nat -A POSTROUTING -o wlan0 -j MASQUERADE")
 
-                # 3. Настраиваем и запускаем DHCP-сервер
                 conf_path = "/tmp/zerocd_usb_dhcp.conf"
                 with open(conf_path, "w") as f:
-                    f.write("port=0\n")  # Отключает конфликтующий DNS-сервер
+                    f.write("port=0\n")
                     f.write("interface=usb0\n")
                     f.write("dhcp-range=192.168.7.2,192.168.7.2,255.255.255.0,1h\n")
-                    f.write("dhcp-option=3,192.168.7.1\n")      # Роутер (Шлюз) - это мы
-                    f.write("dhcp-option=6,8.8.8.8,1.1.1.1\n")  # DNS от Google и Cloudflare
+                    f.write("dhcp-option=3,192.168.7.1\n")
+                    f.write("dhcp-option=6,8.8.8.8,1.1.1.1\n")
                 
                 os.system("sudo pkill -f zerocd_usb_dhcp.conf")
                 time.sleep(0.5)
                 os.system(f"sudo dnsmasq -C {conf_path}")
-                
-                self.logger.info("USB DHCP & NAT Router configured (Brute-force mode)!")
+                self.logger.info("USB DHCP & NAT Router configured!")
             except Exception as e:
                 self.logger.error(f"Failed to start USB DHCP: {e}")
                 
@@ -289,8 +274,6 @@ class GadgetManager:
             udc_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/UDC'
             self._write_file(udc_file, self._udc)
             self.state = GadgetState.ACTIVE
-            
-            # ЗАПУСКАЕМ DHCP СЕРВЕР СРАЗУ ПОСЛЕ ПОДКЛЮЧЕНИЯ КАБЕЛЯ
             self._setup_usb_network_dhcp()
             return True
         except: return False
@@ -309,7 +292,6 @@ class GadgetManager:
 
     def set_iso(self, iso_path: str) -> bool:
         if not os.path.exists(iso_path) or not os.access(iso_path, os.R_OK):
-            self.logger.error(f"Cannot access file: {iso_path}")
             return False
             
         iso_path = os.path.abspath(iso_path)
@@ -323,40 +305,27 @@ class GadgetManager:
             was_bound = (self.state == GadgetState.ACTIVE)
             lun0_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.0/file'
             
-            # --- ВСЕГДА ОТКЛЮЧАЕМ USB ---
-            # Это единственный способ заставить Windows/Mac перечитать диск 100% раз из 100
             if was_bound:
-                self.logger.info("Unbinding USB to force host to re-read device...")
                 self.unbind()
                 time.sleep(1.2)
             
             if needs_rebuild:
-                self.logger.info(f"Rebuilding gadget for {'CD-ROM' if is_cdrom else 'HDD'} mode...")
                 if not self._create_gadget_structure(is_cdrom=is_cdrom):
                     return False
                 self._current_mode_is_cdrom = is_cdrom
                 
-            # Записываем файл диска в слот
-            self.logger.info("Ejecting medium...")
             self._write_file(lun0_file, '\n')
             time.sleep(0.5)
-            self.logger.info(f"Inserting new medium: {iso_path}")
             self._write_file(lun0_file, iso_path)
             
-            # --- ПОДКЛЮЧАЕМ ОБРАТНО ---
             if was_bound:
-                self.logger.info("Rebinding USB...")
                 self.bind()
                 time.sleep(1.0)
             
             self.current_iso = iso_path
-            self.logger.info("Swap complete!")
             return True
             
         except Exception as e:
-            self.logger.error(f"Failed to set image: {e}")
-            import traceback
-            self.logger.error(traceback.format_exc())
             return False
 
     def shutdown(self):
@@ -364,4 +333,4 @@ class GadgetManager:
         self._safe_cleanup_gadget()
 
     def get_status(self) -> Dict[str, Any]:
-        return {'state': self.state.value, 'current_iso': self.current_iso, 'udc': self._udc, 'functions': ['mass_storage']}
+        return {'state': self.state.value, 'current_iso': self.current_iso, 'udc': self._udc, 'functions':['mass_storage']}
