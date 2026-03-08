@@ -75,8 +75,7 @@ class WiFiManager:
     def _check_wifi(self):
         """Check if WiFi hardware is available."""
         try:
-            result = subprocess.run(
-                ["ip", "link", "show", self.wifi_interface],
+            result = subprocess.run(["ip", "link", "show", self.wifi_interface],
                 capture_output=True,
                 text=True,
                 timeout=5
@@ -196,7 +195,7 @@ class WiFiManager:
     def scan(self) -> List[str]:
         """Scan for available networks."""
         if not self.has_wifi:
-            return []
+            return[]
         
         try:
             result = subprocess.run(
@@ -206,7 +205,7 @@ class WiFiManager:
                 timeout=15
             )
             
-            networks = []
+            networks =[]
             for line in result.stdout.split('\n'):
                 if 'ESSID:' in line:
                     ssid = line.split('ESSID:')[1].strip().strip('"')
@@ -306,8 +305,7 @@ network={{
     def get_ip(self) -> Optional[str]:
         """Get WiFi interface IP address."""
         try:
-            result = subprocess.run(
-                ["ip", "-4", "addr", "show", self.wifi_interface],
+            result = subprocess.run(["ip", "-4", "addr", "show", self.wifi_interface],
                 capture_output=True,
                 text=True,
                 timeout=5
@@ -336,40 +334,55 @@ network={{
         return WiFiState.OFF
 
     def get_current_ssid(self) -> Optional[str]:
-        """Get current SSID directly from Linux OS."""
+        """Get current SSID using multiple Linux utilities."""
         if not self.has_wifi:
             return None
             
+        # Способ 1: Стандартный iw (работает на уровне ядра)
         try:
-            # Пытаемся спросить у утилиты iwgetid (самый надежный способ)
-            result = subprocess.run(["iwgetid", "-r"], capture_output=True, text=True)
-            ssid = result.stdout.strip()
-            if ssid:
-                return ssid
-                
-            # Запасной вариант через iw
-            result = subprocess.run(["iw", "dev", self.wifi_interface, "link"], capture_output=True, text=True)
+            result = subprocess.run(["sudo", "iw", "dev", self.wifi_interface, "link"], capture_output=True, text=True, timeout=2)
             for line in result.stdout.split('\n'):
                 if 'SSID:' in line:
-                    return line.split('SSID:')[1].strip()
-        except:
-            pass
+                    ssid = line.split('SSID:')[1].strip()
+                    if ssid: return ssid
+        except: pass
+
+        # Способ 2: NetworkManager (Для новых Raspberry Pi OS Bookworm)
+        try:
+            result = subprocess.run(["sudo", "nmcli", "-t", "-f", "active,ssid", "dev", "wifi"], capture_output=True, text=True, timeout=2)
+            for line in result.stdout.split('\n'):
+                if line.startswith('yes:'):
+                    ssid = line.split(':')[1].strip()
+                    if ssid: return ssid
+        except: pass
+
+        # Способ 3: wpa_cli (Для старых Raspberry Pi OS)
+        try:
+            result = subprocess.run(["sudo", "wpa_cli", "-i", self.wifi_interface, "status"], capture_output=True, text=True, timeout=2)
+            for line in result.stdout.split('\n'):
+                if line.startswith('ssid='):
+                    ssid = line.split('=')[1].strip()
+                    if ssid: return ssid
+        except: pass
+
+        # Способ 4: Старый iwgetid
+        try:
+            result = subprocess.run(["sudo", "iwgetid", "-r"], capture_output=True, text=True, timeout=2)
+            ssid = result.stdout.strip()
+            if ssid: return ssid
+        except: pass
             
-        # Если команды не сработали, но мы знаем, что подключены
-        if self.state == WiFiState.CONNECTED and self.current_network:
-            return self.current_network.ssid
+        # Если ни одна команда не сработала, но у нас есть IP-адрес
+        if self.state == WiFiState.CONNECTED:
+            if self.current_network and self.current_network.ssid:
+                return self.current_network.ssid
+            return "Unknown Network" # Заглушка, чтобы не писало "None"
             
         return None
 
     def is_connected(self) -> bool:
         """Check if connected to WiFi."""
         return self.get_status() == WiFiState.CONNECTED
-
-    def get_current_ssid(self) -> Optional[str]:
-        """Get current SSID."""
-        if self.state == WiFiState.CONNECTED:
-            return self.current_network.ssid if self.current_network else None
-        return None
 
     def get_primary_ssid(self) -> Optional[str]:
         """Get primary (saved) SSID."""
