@@ -327,11 +327,39 @@ network={{
         if self.state == WiFiState.AP_MODE:
             return WiFiState.AP_MODE
         
+        # Если у нас есть IP-адрес на wlan0, значит мы 100% подключены (даже если Linux сделал это сам)
         ip = self.get_ip()
         if ip:
+            self.state = WiFiState.CONNECTED
             return WiFiState.CONNECTED
         
         return WiFiState.OFF
+
+    def get_current_ssid(self) -> Optional[str]:
+        """Get current SSID directly from Linux OS."""
+        if not self.has_wifi:
+            return None
+            
+        try:
+            # Пытаемся спросить у утилиты iwgetid (самый надежный способ)
+            result = subprocess.run(["iwgetid", "-r"], capture_output=True, text=True)
+            ssid = result.stdout.strip()
+            if ssid:
+                return ssid
+                
+            # Запасной вариант через iw
+            result = subprocess.run(["iw", "dev", self.wifi_interface, "link"], capture_output=True, text=True)
+            for line in result.stdout.split('\n'):
+                if 'SSID:' in line:
+                    return line.split('SSID:')[1].strip()
+        except:
+            pass
+            
+        # Если команды не сработали, но мы знаем, что подключены
+        if self.state == WiFiState.CONNECTED and self.current_network:
+            return self.current_network.ssid
+            
+        return None
 
     def is_connected(self) -> bool:
         """Check if connected to WiFi."""

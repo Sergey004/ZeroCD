@@ -24,6 +24,8 @@ from system.logger import get_logger
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
 app.secret_key = WEBUI_SECRET_KEY
+download_tasks: Dict[str, dict] = {}
+zero_app_instance = None
 
 @app.template_filter('format_size')
 def format_size_filter(bytes_size):
@@ -227,13 +229,13 @@ def api_select():
     filename = request.get_json().get('filename', '')
     path = iso_manager.get_iso_path(filename)
     if path:
-        try:
-            import main
-            if hasattr(main, 'app') and main.app:
-                main.app.on_iso_selected(filename)
-                return jsonify({'success': True, 'path': path})
-        except: pass
-    return jsonify({'error': 'Failed to select image'}), 404
+        if zero_app_instance:
+            zero_app_instance.logger.info(f"WebUI requested to select: {filename}")
+            zero_app_instance.on_iso_selected(filename)
+            return jsonify({'success': True, 'path': path})
+        else:
+            return jsonify({'error': 'Main app is not linked to WebUI'}), 500
+    return jsonify({'error': 'File not found'}), 404
 
 @app.route('/api/disk')
 def api_disk():
@@ -255,7 +257,10 @@ def get_disk_usage():
         return total, used, free
     except: return 0, 0, 0
 
-def start_webui(host: str = WEBUI_HOST, port: int = WEBUI_PORT, debug: bool = False):
+def start_webui(app_instance=None, host=WEBUI_HOST, port=WEBUI_PORT, debug=False):
+    global zero_app_instance
+    zero_app_instance = app_instance  # Запоминаем нашу главную программу
+    
     import logging
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.ERROR)

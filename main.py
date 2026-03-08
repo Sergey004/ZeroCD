@@ -123,7 +123,7 @@ class ZeroCDApp:
                 import threading
                 from web.server import start_webui
                 # Запускаем Flask в отдельном потоке, чтобы он не заблокировал меню и джойстик
-                web_thread = threading.Thread(target=start_webui, daemon=True)
+                web_thread = threading.Thread(target=start_webui, args=(self,), daemon=True)
                 web_thread.start()
                 self.logger.info("WebUI background thread started")
             except Exception as e:
@@ -333,7 +333,7 @@ class ZeroCDApp:
                 selected_index=self.menu.get_index() if self.menu else 0,
                 scroll_offset=self.menu.get_scroll_offset() if self.menu else 0,
                 active_iso=self.active_iso,
-                wifi_on=self.wifi_enabled,
+                wifi_on=self.wifi.is_connected() if self.wifi else False,
                 usb_bound=self.usb_connected,
                 mtp_on=self.mtp_enabled
             )
