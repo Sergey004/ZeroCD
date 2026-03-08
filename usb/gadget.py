@@ -28,6 +28,7 @@ class GadgetManager:
         self.function_name = "mass_storage.usb0"
         self._udc = None
         self._current_mode_is_cdrom = True
+        self._dhcp_lock = threading.Lock() 
         
         self._generate_hardware_ids()
 
@@ -219,38 +220,42 @@ class GadgetManager:
     def _setup_usb_network_dhcp(self):
         """Поднимаем интерфейс usb0 и запускаем DHCP для ПК (Mac/Windows)"""
         def task():
-            for _ in range(10):
-                time.sleep(0.5)
-                if os.path.exists('/sys/class/net/usb0'):
-                    break
+            # Блокируем параллельный запуск этой функции!
+            with self._dhcp_lock:
+                for _ in range(15):
+                    time.sleep(0.5)
+                    if os.path.exists('/sys/class/net/usb0'):
+                        break
+                        
+                try:
+                    self.logger.info("Configuring USB Network and NAT...")
                     
-            try:
-                self.logger.info("Configuring USB Network and NAT...")
-                os.system("sudo ip addr flush dev usb0")
-                os.system("sudo ip addr add 192.168.7.1/24 dev usb0")
-                os.system("sudo ip link set usb0 up")
+                    # Жестко убиваем старый процесс, если он завис
+                    os.system("sudo pkill -9 -f zerocd_usb_dhcp.conf 2>/dev/null")
+                    time.sleep(0.5)
 
-                # Включаем роутинг
-                os.system("sudo sysctl -w net.ipv4.ip_forward=1")
-                os.system("sudo iptables -t nat -F")
-                os.system("sudo iptables -F FORWARD")
-                os.system("sudo iptables -P FORWARD ACCEPT")
-                os.system("sudo iptables -t nat -A POSTROUTING -o wlan0 -j MASQUERADE")
+                    os.system("sudo ip addr flush dev usb0 2>/dev/null")
+                    os.system("sudo ip addr add 192.168.7.1/24 dev usb0 2>/dev/null")
+                    os.system("sudo ip link set usb0 up 2>/dev/null")
 
-                conf_path = "/tmp/zerocd_usb_dhcp.conf"
-                with open(conf_path, "w") as f:
-                    f.write("port=0\n")
-                    f.write("interface=usb0\n")
-                    f.write("dhcp-range=192.168.7.2,192.168.7.2,255.255.255.0,1h\n")
-                    f.write("dhcp-option=3,192.168.7.1\n")
-                    f.write("dhcp-option=6,8.8.8.8,1.1.1.1\n")
-                
-                os.system("sudo pkill -f zerocd_usb_dhcp.conf")
-                time.sleep(0.5)
-                os.system(f"sudo dnsmasq -C {conf_path}")
-                self.logger.info("USB DHCP & NAT Router configured!")
-            except Exception as e:
-                self.logger.error(f"Failed to start USB DHCP: {e}")
+                    os.system("sudo sysctl -w net.ipv4.ip_forward=1 2>/dev/null")
+                    os.system("sudo iptables -t nat -F 2>/dev/null")
+                    os.system("sudo iptables -F FORWARD 2>/dev/null")
+                    os.system("sudo iptables -P FORWARD ACCEPT 2>/dev/null")
+                    os.system("sudo iptables -t nat -A POSTROUTING -o wlan0 -j MASQUERADE 2>/dev/null")
+
+                    conf_path = "/tmp/zerocd_usb_dhcp.conf"
+                    with open(conf_path, "w") as f:
+                        f.write("port=0\n")
+                        f.write("interface=usb0\n")
+                        f.write("dhcp-range=192.168.7.2,192.168.7.2,255.255.255.0,1h\n")
+                        f.write("dhcp-option=3,192.168.7.1\n")
+                        f.write("dhcp-option=6,8.8.8.8,1.1.1.1\n")
+                    
+                    os.system(f"sudo dnsmasq -C {conf_path} 2>/dev/null")
+                    self.logger.info("USB DHCP & NAT Router configured!")
+                except Exception as e:
+                    self.logger.error(f"Failed to start USB DHCP: {e}")
                 
         threading.Thread(target=task, daemon=True).start()
 
