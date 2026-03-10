@@ -5,10 +5,9 @@ Flask web interface for ISO/IMG management and WiFi configuration
 import os
 import time
 import threading
-from flask import Flask, render_template, request, jsonify, send_from_directory, redirect, url_for
+from flask import Flask, render_template, request, jsonify, send_from_directory, redirect, url_for, cli
 from werkzeug.utils import secure_filename
 from typing import Optional, Dict
-os.environ["WERKZEUG_RUN_MAIN"] = "true"
 
 from config import (
     ISO_DIR,
@@ -262,7 +261,7 @@ def get_disk_usage():
 def start_webui(app_instance=None, host=WEBUI_HOST, port=WEBUI_PORT, debug=False):
     global zero_app_instance
     zero_app_instance = app_instance
-
+    cli.show_server_banner = lambda *_: None
     # Оставляем только отключение спама на каждый запрос
     import logging
     log = logging.getLogger('werkzeug')
