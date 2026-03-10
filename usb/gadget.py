@@ -230,19 +230,18 @@ class GadgetManager:
                 try:
                     self.logger.info("Configuring USB Network and NAT...")
                     
-                    # Жестко убиваем старый процесс, если он завис
-                    os.system("sudo pkill -9 -f zerocd_usb_dhcp.conf 2>/dev/null")
+                    # БЕЗОПАСНЫЙ ВЫЗОВ (без shell), скрывающий весь системный мусор
+                    subprocess.run(["sudo", "pkill", "-9", "-f", "zerocd_usb_dhcp.conf"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     time.sleep(0.5)
 
-                    os.system("sudo ip addr flush dev usb0 2>/dev/null")
-                    os.system("sudo ip addr add 192.168.7.1/24 dev usb0 2>/dev/null")
-                    os.system("sudo ip link set usb0 up 2>/dev/null")
-
-                    os.system("sudo sysctl -w net.ipv4.ip_forward=1 2>/dev/null")
-                    os.system("sudo iptables -t nat -F 2>/dev/null")
-                    os.system("sudo iptables -F FORWARD 2>/dev/null")
-                    os.system("sudo iptables -P FORWARD ACCEPT 2>/dev/null")
-                    os.system("sudo iptables -t nat -A POSTROUTING -o wlan0 -j MASQUERADE 2>/dev/null")
+                    # Список команд для сети и маршрутизации
+                    commands = [["sudo", "ip", "addr", "flush", "dev", "usb0"],["sudo", "ip", "addr", "add", "192.168.7.1/24", "dev", "usb0"],["sudo", "ip", "link", "set", "usb0", "up"],["sudo", "sysctl", "-w", "net.ipv4.ip_forward=1"],
+                        ["sudo", "iptables", "-t", "nat", "-F"],["sudo", "iptables", "-F", "FORWARD"],["sudo", "iptables", "-P", "FORWARD", "ACCEPT"],["sudo", "iptables", "-t", "nat", "-A", "POSTROUTING", "-o", "wlan0", "-j", "MASQUERADE"]
+                    ]
+                    
+                    # Выполняем их абсолютно бесшумно
+                    for cmd in commands:
+                        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
                     conf_path = "/tmp/zerocd_usb_dhcp.conf"
                     with open(conf_path, "w") as f:
@@ -252,13 +251,13 @@ class GadgetManager:
                         f.write("dhcp-option=3,192.168.7.1\n")
                         f.write("dhcp-option=6,8.8.8.8,1.1.1.1\n")
                     
-                    os.system(f"sudo dnsmasq -C {conf_path} 2>/dev/null")
+                    subprocess.run(["sudo", "dnsmasq", "-C", conf_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     self.logger.info("USB DHCP & NAT Router configured!")
                 except Exception as e:
                     self.logger.error(f"Failed to start USB DHCP: {e}")
                 
         threading.Thread(target=task, daemon=True).start()
-
+                
     def init(self) -> bool:
         if os.geteuid() != 0: return False
         if not self._check_module("dwc2"):
