@@ -29,6 +29,7 @@ class GadgetManager:
         self._udc = None
         self._current_mode_is_cdrom = True
         self._current_pure_mode = False
+        self._current_apple_mode = False  # <--- Флаг для нашей пасхалки
         self._dhcp_lock = threading.Lock()
         
         self._generate_hardware_ids()
@@ -130,7 +131,7 @@ class GadgetManager:
                     time.sleep(0.5)
                 else: raise
 
-    def _create_gadget_structure(self, is_cdrom: bool = True, pure_mode: bool = False) -> bool:
+    def _create_gadget_structure(self, is_cdrom: bool = True, pure_mode: bool = False, apple_mode: bool = False) -> bool:
         gadget_path = f'/sys/kernel/config/usb_gadget/{self.gadget_name}'
         try:
             self._safe_cleanup_gadget()
@@ -140,22 +141,33 @@ class GadgetManager:
             self._write_file(f'{gadget_path}/bcdDevice', '0x0100')
             self._write_file(f'{gadget_path}/bcdUSB', '0x0200')
 
-            # === УЛЬТИМАТИВНЫЙ ОБХОД ЗАЩИТЫ APPLE ===
-            if pure_mode:
-                self.logger.info("Building PURE STORAGE gadget (Apple SuperDrive Spoof)")
-                # Маскируемся под оригинальный Apple USB SuperDrive
+            # === ВЫБОР РОЛИ УСТРОЙСТВА ===
+            if apple_mode:
+                # ПАСХАЛКА: Триггерим DRM-защиту Apple!
+                self.logger.info("Building PURE STORAGE gadget (Apple SuperDrive Easter Egg!)")
                 self._write_file(f'{gadget_path}/idVendor', '0x05ac')  
                 self._write_file(f'{gadget_path}/idProduct', '0x1500') 
                 self._write_file(f'{gadget_path}/bDeviceClass', '0x00')
                 self._write_file(f'{gadget_path}/bDeviceSubClass', '0x00')
                 self._write_file(f'{gadget_path}/bDeviceProtocol', '0x00')
-                
                 mfg_name = 'Apple Inc.'
-                prod_name = 'Apple Optical USB Drive'
-                
-                # КРИТИЧЕСКИ ВАЖНО: Запрещаем отправку STALL (исправляет "Waiting for root device")
+                prod_name = 'MacBook Air SuperDrive'
                 stall_val = '0' 
+                
+            elif pure_mode:
+                # РАБОЧИЙ РЕЖИМ: Безымянный дисковод для старых Маков
+                self.logger.info("Building PURE STORAGE gadget (Generic DVD Spoof)")
+                self._write_file(f'{gadget_path}/idVendor', '0x1d6b')  
+                self._write_file(f'{gadget_path}/idProduct', '0x0104') 
+                self._write_file(f'{gadget_path}/bDeviceClass', '0x00')
+                self._write_file(f'{gadget_path}/bDeviceSubClass', '0x00')
+                self._write_file(f'{gadget_path}/bDeviceProtocol', '0x00')
+                mfg_name = 'Generic'
+                prod_name = 'USB Optical Drive'
+                stall_val = '0' 
+                
             else:
+                # СТАНДАРТ: Наш крутой комбайн с сетью
                 self.logger.info("Building COMPOSITE gadget (Storage + Network)")
                 self._write_file(f'{gadget_path}/idVendor', '0x1d6b')
                 self._write_file(f'{gadget_path}/idProduct', '0x0105')
@@ -165,10 +177,9 @@ class GadgetManager:
                 self._write_file(f'{gadget_path}/os_desc/use', '1')
                 self._write_file(f'{gadget_path}/os_desc/b_vendor_code', '0xcd')
                 self._write_file(f'{gadget_path}/os_desc/qw_sign', 'MSFT100')
-                
                 mfg_name = 'ZeroCD'
                 prod_name = 'ZeroCD + LAN'
-                stall_val = '1' # Нормальное поведение для современных ОС
+                stall_val = '1'
 
             os.makedirs(f'{gadget_path}/strings/0x409', exist_ok=True)
             self._write_file(f'{gadget_path}/strings/0x409/manufacturer', mfg_name)
@@ -178,15 +189,16 @@ class GadgetManager:
             config_path = f'{gadget_path}/configs/{self.config_name}'
             os.makedirs(config_path, exist_ok=True)
             os.makedirs(f'{config_path}/strings/0x409', exist_ok=True)
-            self._write_file(f'{config_path}/strings/0x409/configuration', 'Storage Only' if pure_mode else 'CD-ROM + LAN')
+            
+            # Название конфига тоже меняется для реалистичности
+            cfg_name = 'Storage Only' if (pure_mode or apple_mode) else 'CD-ROM + LAN'
+            self._write_file(f'{config_path}/strings/0x409/configuration', cfg_name)
             self._write_file(f'{config_path}/MaxPower', '250')
 
             # 1. СОЗДАЕМ ДИСКОВОД
             ms_path = f'{gadget_path}/functions/mass_storage.usb0'
             os.makedirs(ms_path, exist_ok=True)
             time.sleep(0.1)
-            
-            # Применяем настройку STALL
             self._write_file(f'{ms_path}/stall', stall_val)
             
             lun0_path = f'{ms_path}/lun.0'
@@ -205,8 +217,8 @@ class GadgetManager:
                 self._write_file(f'{lun0_path}/nofua', '1')
             os.symlink(ms_path, f'{config_path}/mass_storage.usb0')
 
-            # 2. ЕСЛИ НЕ PURE MODE - ДОБАВЛЯЕМ СЕТЬ
-            if not pure_mode:
+            # 2. ДОБАВЛЯЕМ СЕТЬ ТОЛЬКО ЕСЛИ ЭТО ОБЫЧНЫЙ РЕЖИМ
+            if not pure_mode and not apple_mode:
                 ecm_path = f'{gadget_path}/functions/ecm.usb0'
                 os.makedirs(ecm_path, exist_ok=True)
                 self._write_file(f'{ecm_path}/host_addr', self._host_mac)
@@ -262,9 +274,10 @@ class GadgetManager:
         self._udc = self._get_udc()
         if not self._udc: return False
         
-        if not self._create_gadget_structure(is_cdrom=True, pure_mode=False): return False
+        if not self._create_gadget_structure(is_cdrom=True, pure_mode=False, apple_mode=False): return False
         self._current_mode_is_cdrom = True
         self._current_pure_mode = False
+        self._current_apple_mode = False
         self.state = GadgetState.CONFIGURED
         return True
 
@@ -275,7 +288,8 @@ class GadgetManager:
             self._write_file(udc_file, self._udc)
             self.state = GadgetState.ACTIVE
             
-            if not self._current_pure_mode:
+            # Сеть не запускаем, если включен любой из "чистых" режимов
+            if not self._current_pure_mode and not self._current_apple_mode:
                 self._setup_usb_network_dhcp()
             return True
         except: return False
@@ -301,11 +315,15 @@ class GadgetManager:
             return True
             
         is_cdrom = iso_path.lower().endswith('.iso')
+        
+        # Детектор режимов
+        apple_mode = '.apple.' in iso_path.lower()
         pure_mode = '.pure.' in iso_path.lower()
         
         try:
             needs_rebuild = (getattr(self, '_current_mode_is_cdrom', None) != is_cdrom) or \
-                            (getattr(self, '_current_pure_mode', None) != pure_mode)
+                            (getattr(self, '_current_pure_mode', None) != pure_mode) or \
+                            (getattr(self, '_current_apple_mode', None) != apple_mode)
                             
             was_bound = (self.state == GadgetState.ACTIVE)
             lun0_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.0/file'
@@ -316,11 +334,12 @@ class GadgetManager:
                 time.sleep(1.2)
             
             if needs_rebuild:
-                self.logger.info(f"Rebuilding gadget. CD-ROM: {is_cdrom}, PURE MODE: {pure_mode}")
-                if not self._create_gadget_structure(is_cdrom=is_cdrom, pure_mode=pure_mode):
+                self.logger.info(f"Rebuilding gadget. CD-ROM: {is_cdrom}, PURE: {pure_mode}, APPLE: {apple_mode}")
+                if not self._create_gadget_structure(is_cdrom=is_cdrom, pure_mode=pure_mode, apple_mode=apple_mode):
                     return False
                 self._current_mode_is_cdrom = is_cdrom
                 self._current_pure_mode = pure_mode
+                self._current_apple_mode = apple_mode
                 
             self._write_file(lun0_file, '\n')
             time.sleep(0.5)
