@@ -151,7 +151,7 @@ class GadgetManager:
                 self._write_file(f'{gadget_path}/bDeviceSubClass', '0x00')
                 self._write_file(f'{gadget_path}/bDeviceProtocol', '0x00')
                 mfg_name = 'Apple Inc.'
-                prod_name = 'Apple Optical USB Drive'
+                prod_name = 'Apple SuperDrive Drive'
                 stall_val = '0' 
                 
             elif pure_mode:
