@@ -22,6 +22,7 @@ from net.wifi import get_wifi_manager
 from net.captive import get_captive_portal
 from system.logger import get_logger
 
+os.environ["WERKZEUG_RUN_MAIN"] = "true"
 app = Flask(__name__, template_folder='templates', static_folder='static')
 app.secret_key = WEBUI_SECRET_KEY
 download_tasks: Dict[str, dict] = {}
@@ -262,7 +263,7 @@ def start_webui(app_instance=None, host=WEBUI_HOST, port=WEBUI_PORT, debug=False
     zero_app_instance = app_instance
     
     # Отключаем красный стартовый баннер Flask
-    os.environ["WERKZEUG_RUN_MAIN"] = "true"
+    
     
     import logging
     log = logging.getLogger('werkzeug')
