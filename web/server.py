@@ -22,7 +22,7 @@ from net.wifi import get_wifi_manager
 from net.captive import get_captive_portal
 from system.logger import get_logger
 
-os.environ["WERKZEUG_RUN_MAIN"] = "true"
+
 app = Flask(__name__, template_folder='templates', static_folder='static')
 app.secret_key = WEBUI_SECRET_KEY
 download_tasks: Dict[str, dict] = {}
@@ -262,14 +262,13 @@ def start_webui(app_instance=None, host=WEBUI_HOST, port=WEBUI_PORT, debug=False
     global zero_app_instance
     zero_app_instance = app_instance
     
-    # Отключаем красный стартовый баннер Flask
-    
-    
+    # Оставляем только отключение спама на каждый запрос
     import logging
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.ERROR)
     
     logger.info(f"Starting WebUI on http://{host}:{port}")
+    # Запускаем штатно
     app.run(host=host, port=port, debug=debug, use_reloader=False)
 
 if __name__ == '__main__':
