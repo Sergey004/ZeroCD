@@ -220,7 +220,7 @@ class GadgetManager:
     def _setup_usb_network_dhcp(self):
         """Поднимаем интерфейс usb0 и запускаем DHCP для ПК (Mac/Windows)"""
         def task():
-            # Блокируем параллельный запуск этой функции!
+            # Блокируем параллельный запуск, чтобы порты не конфликтовали
             with self._dhcp_lock:
                 for _ in range(15):
                     time.sleep(0.5)
@@ -230,16 +230,18 @@ class GadgetManager:
                 try:
                     self.logger.info("Configuring USB Network and NAT...")
                     
-                    # БЕЗОПАСНЫЙ ВЫЗОВ (без shell), скрывающий весь системный мусор
-                    subprocess.run(["sudo", "pkill", "-9", "-f", "zerocd_usb_dhcp.conf"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    # ИСПРАВЛЕНИЕ 1: Убрали sudo (у нас и так root)
+                    # ИСПРАВЛЕНИЕ 2: Используем subprocess.run с DEVNULL, чтобы ничего не лезло в консоль
+                    subprocess.run(["pkill", "-9", "-f", "zerocd_usb_dhcp.conf"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     time.sleep(0.5)
 
-                    # Список команд для сети и маршрутизации
-                    commands = [["sudo", "ip", "addr", "flush", "dev", "usb0"],["sudo", "ip", "addr", "add", "192.168.7.1/24", "dev", "usb0"],["sudo", "ip", "link", "set", "usb0", "up"],["sudo", "sysctl", "-w", "net.ipv4.ip_forward=1"],
-                        ["sudo", "iptables", "-t", "nat", "-F"],["sudo", "iptables", "-F", "FORWARD"],["sudo", "iptables", "-P", "FORWARD", "ACCEPT"],["sudo", "iptables", "-t", "nat", "-A", "POSTROUTING", "-o", "wlan0", "-j", "MASQUERADE"]
+                    # Выполняем сетевые настройки абсолютно бесшумно
+                    commands =[
+                        ["ip", "addr", "flush", "dev", "usb0"],["ip", "addr", "add", "192.168.7.1/24", "dev", "usb0"],
+                        ["ip", "link", "set", "usb0", "up"],["sysctl", "-w", "net.ipv4.ip_forward=1"],["iptables", "-t", "nat", "-F"],
+                        ["iptables", "-F", "FORWARD"],["iptables", "-P", "FORWARD", "ACCEPT"],["iptables", "-t", "nat", "-A", "POSTROUTING", "-o", "wlan0", "-j", "MASQUERADE"]
                     ]
                     
-                    # Выполняем их абсолютно бесшумно
                     for cmd in commands:
                         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -251,10 +253,12 @@ class GadgetManager:
                         f.write("dhcp-option=3,192.168.7.1\n")
                         f.write("dhcp-option=6,8.8.8.8,1.1.1.1\n")
                     
-                    subprocess.run(["sudo", "dnsmasq", "-C", conf_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    subprocess.run(["dnsmasq", "-C", conf_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     self.logger.info("USB DHCP & NAT Router configured!")
                 except Exception as e:
                     self.logger.error(f"Failed to start USB DHCP: {e}")
+                
+        threading.Thread(target=task, daemon=True).start()
                 
         threading.Thread(target=task, daemon=True).start()
                 

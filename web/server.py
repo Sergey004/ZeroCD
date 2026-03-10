@@ -259,11 +259,15 @@ def get_disk_usage():
 
 def start_webui(app_instance=None, host=WEBUI_HOST, port=WEBUI_PORT, debug=False):
     global zero_app_instance
-    zero_app_instance = app_instance  # Запоминаем нашу главную программу
+    zero_app_instance = app_instance
+    
+    # Отключаем красный стартовый баннер Flask
+    os.environ["WERKZEUG_RUN_MAIN"] = "true"
     
     import logging
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.ERROR)
+    
     logger.info(f"Starting WebUI on http://{host}:{port}")
     app.run(host=host, port=port, debug=debug, use_reloader=False)
 
