@@ -28,12 +28,12 @@ class GadgetManager:
         self.function_name = "mass_storage.usb0"
         self._udc = None
         self._current_mode_is_cdrom = True
-        self._dhcp_lock = threading.Lock() 
+        self._current_pure_mode = False  # Флаг "Чистого накопителя" без сети
+        self._dhcp_lock = threading.Lock()
         
         self._generate_hardware_ids()
 
     def _generate_hardware_ids(self):
-        """Создает стабильные MAC-адреса и Серийник на основе процессора"""
         self._serial = "zerocd-123456"
         self._host_mac = "02:00:00:00:00:01"
         self._dev_mac  = "06:00:00:00:00:02"
@@ -47,23 +47,17 @@ class GadgetManager:
                         last_10 = self._serial[-10:]
                         pairs =[last_10[i:i+2] for i in range(0, 10, 2)]
                         base_mac = ":" + ":".join(pairs)
-                        
-                        # ИСПРАВЛЕНИЕ: MAC адрес должен быть строго одинаковым для RNDIS и ECM!
                         self._host_mac = "02" + base_mac
                         self._dev_mac  = "06" + base_mac
-                        self.logger.info(f"Hardware IDs generated from Serial: {serial}")
                         break
-        except Exception as e:
-            self.logger.warning(f"Could not read Pi Serial: {e}")
+        except: pass
 
     def _check_module(self, module_name):
         try:
-            result = subprocess.run(['lsmod'], capture_output=True, text=True)
-            return module_name in result.stdout
+            return module_name in subprocess.run(['lsmod'], capture_output=True, text=True).stdout
         except: return False
 
     def _load_module(self, module_name):
-        self.logger.info(f"Loading module: {module_name}")
         try:
             subprocess.run(['modprobe', module_name], check=True)
             time.sleep(0.5)
@@ -91,7 +85,6 @@ class GadgetManager:
         gadget_path = f"/sys/kernel/config/usb_gadget/{self.gadget_name}"
         if not os.path.exists(gadget_path): return True
         
-        self.logger.info("Cleaning up old USB structure...")
         udc_file = f"{gadget_path}/UDC"
         if os.path.exists(udc_file):
             try:
@@ -137,7 +130,8 @@ class GadgetManager:
                     time.sleep(0.5)
                 else: raise
 
-    def _create_gadget_structure(self, is_cdrom: bool = True) -> bool:
+    def _create_gadget_structure(self, is_cdrom: bool = True, pure_mode: bool = False) -> bool:
+        """Создает структуру USB. Если pure_mode=True, сеть полностью вырезается."""
         gadget_path = f'/sys/kernel/config/usb_gadget/{self.gadget_name}'
         try:
             self._safe_cleanup_gadget()
@@ -145,31 +139,40 @@ class GadgetManager:
             os.makedirs(gadget_path, exist_ok=True)
 
             self._write_file(f'{gadget_path}/idVendor', '0x1d6b')
-            # ИСПРАВЛЕНИЕ: Меняем PID на 0x0105, чтобы Мак забыл кэш старых ошибок!
             self._write_file(f'{gadget_path}/idProduct', '0x0105')
             self._write_file(f'{gadget_path}/bcdDevice', '0x0100')
             self._write_file(f'{gadget_path}/bcdUSB', '0x0200')
 
-            self._write_file(f'{gadget_path}/bDeviceClass', '0xEF')
-            self._write_file(f'{gadget_path}/bDeviceSubClass', '0x02')
-            self._write_file(f'{gadget_path}/bDeviceProtocol', '0x01')
-
-            self._write_file(f'{gadget_path}/os_desc/use', '1')
-            self._write_file(f'{gadget_path}/os_desc/b_vendor_code', '0xcd')
-            self._write_file(f'{gadget_path}/os_desc/qw_sign', 'MSFT100')
+            # === МАГИЯ СОВМЕСТИМОСТИ ===
+            if pure_mode:
+                # Режим для старых систем: притворяемся ТОЛЬКО стандартным накопителем
+                self.logger.info("Building PURE STORAGE gadget (No Network)")
+                self._write_file(f'{gadget_path}/bDeviceClass', '0x00')
+                self._write_file(f'{gadget_path}/bDeviceSubClass', '0x00')
+                self._write_file(f'{gadget_path}/bDeviceProtocol', '0x00')
+            else:
+                # Режим комбайна для современных ОС (Накопитель + Сеть)
+                self.logger.info("Building COMPOSITE gadget (Storage + Network)")
+                self._write_file(f'{gadget_path}/bDeviceClass', '0xEF')
+                self._write_file(f'{gadget_path}/bDeviceSubClass', '0x02')
+                self._write_file(f'{gadget_path}/bDeviceProtocol', '0x01')
+                self._write_file(f'{gadget_path}/os_desc/use', '1')
+                self._write_file(f'{gadget_path}/os_desc/b_vendor_code', '0xcd')
+                self._write_file(f'{gadget_path}/os_desc/qw_sign', 'MSFT100')
+            # ===========================
 
             os.makedirs(f'{gadget_path}/strings/0x409', exist_ok=True)
             self._write_file(f'{gadget_path}/strings/0x409/manufacturer', 'ZeroCD')
-            self._write_file(f'{gadget_path}/strings/0x409/product', 'CD + Ethernet')
+            self._write_file(f'{gadget_path}/strings/0x409/product', 'ZeroCD PURE Drive' if pure_mode else 'ZeroCD + LAN')
             self._write_file(f'{gadget_path}/strings/0x409/serialnumber', self._serial)
 
             config_path = f'{gadget_path}/configs/{self.config_name}'
             os.makedirs(config_path, exist_ok=True)
             os.makedirs(f'{config_path}/strings/0x409', exist_ok=True)
-            self._write_file(f'{config_path}/strings/0x409/configuration', 'CD-ROM + LAN')
+            self._write_file(f'{config_path}/strings/0x409/configuration', 'Storage Only' if pure_mode else 'CD-ROM + LAN')
             self._write_file(f'{config_path}/MaxPower', '250')
 
-            # 1. СОЗДАЕМ MASS STORAGE (Дисковод всегда должен быть первым!)
+            # 1. СОЗДАЕМ ДИСКОВОД
             ms_path = f'{gadget_path}/functions/mass_storage.usb0'
             os.makedirs(ms_path, exist_ok=True)
             time.sleep(0.1)
@@ -190,27 +193,26 @@ class GadgetManager:
                 self._write_file(f'{lun0_path}/nofua', '1')
             os.symlink(ms_path, f'{config_path}/mass_storage.usb0')
 
-            # 2. СОЗДАЕМ ECM (MAC OS Network)
-            ecm_path = f'{gadget_path}/functions/ecm.usb0'
-            os.makedirs(ecm_path, exist_ok=True)
-            self._write_file(f'{ecm_path}/host_addr', self._host_mac)
-            self._write_file(f'{ecm_path}/dev_addr', self._dev_mac)
-            os.symlink(ecm_path, f'{config_path}/ecm.usb0')
+            # 2. ЕСЛИ НЕ PURE MODE - ДОБАВЛЯЕМ СЕТЬ
+            if not pure_mode:
+                ecm_path = f'{gadget_path}/functions/ecm.usb0'
+                os.makedirs(ecm_path, exist_ok=True)
+                self._write_file(f'{ecm_path}/host_addr', self._host_mac)
+                self._write_file(f'{ecm_path}/dev_addr', self._dev_mac)
+                os.symlink(ecm_path, f'{config_path}/ecm.usb0')
 
-            # 3. СОЗДАЕМ RNDIS (WINDOWS Network)
-            rndis_path = f'{gadget_path}/functions/rndis.usb0'
-            os.makedirs(rndis_path, exist_ok=True)
-            self._write_file(f'{rndis_path}/host_addr', self._host_mac)
-            self._write_file(f'{rndis_path}/dev_addr', self._dev_mac)
-            rndis_os_desc = f'{rndis_path}/os_desc/interface.rndis'
-            if os.path.exists(rndis_os_desc):
-                self._write_file(f'{rndis_os_desc}/compatible_id', 'RNDIS')
-                self._write_file(f'{rndis_os_desc}/sub_compatible_id', '5162001')
-            os.symlink(rndis_path, f'{config_path}/rndis.usb0')
+                rndis_path = f'{gadget_path}/functions/rndis.usb0'
+                os.makedirs(rndis_path, exist_ok=True)
+                self._write_file(f'{rndis_path}/host_addr', self._host_mac)
+                self._write_file(f'{rndis_path}/dev_addr', self._dev_mac)
+                rndis_os_desc = f'{rndis_path}/os_desc/interface.rndis'
+                if os.path.exists(rndis_os_desc):
+                    self._write_file(f'{rndis_os_desc}/compatible_id', 'RNDIS')
+                    self._write_file(f'{rndis_os_desc}/sub_compatible_id', '5162001')
+                os.symlink(rndis_path, f'{config_path}/rndis.usb0')
 
-            # Привязываем Windows OS Descriptors
-            try: os.symlink(config_path, f'{gadget_path}/os_desc/c.1')
-            except: pass
+                try: os.symlink(config_path, f'{gadget_path}/os_desc/c.1')
+                except: pass
 
             return True
         except Exception as e:
@@ -218,50 +220,27 @@ class GadgetManager:
             return False
 
     def _setup_usb_network_dhcp(self):
-        """Поднимаем интерфейс usb0 и запускаем DHCP для ПК (Mac/Windows)"""
         def task():
-            # Блокируем параллельный запуск, чтобы порты не конфликтовали
             with self._dhcp_lock:
                 for _ in range(15):
                     time.sleep(0.5)
-                    if os.path.exists('/sys/class/net/usb0'):
-                        break
-                        
+                    if os.path.exists('/sys/class/net/usb0'): break
                 try:
-                    self.logger.info("Configuring USB Network and NAT...")
-                    
-                    # ИСПРАВЛЕНИЕ 1: Убрали sudo (у нас и так root)
-                    # ИСПРАВЛЕНИЕ 2: Используем subprocess.run с DEVNULL, чтобы ничего не лезло в консоль
                     subprocess.run(["pkill", "-9", "-f", "zerocd_usb_dhcp.conf"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     time.sleep(0.5)
-
-                    # Выполняем сетевые настройки абсолютно бесшумно
-                    commands =[
-                        ["ip", "addr", "flush", "dev", "usb0"],["ip", "addr", "add", "192.168.7.1/24", "dev", "usb0"],
-                        ["ip", "link", "set", "usb0", "up"],["sysctl", "-w", "net.ipv4.ip_forward=1"],["iptables", "-t", "nat", "-F"],
+                    commands = [["ip", "addr", "flush", "dev", "usb0"],["ip", "addr", "add", "192.168.7.1/24", "dev", "usb0"],["ip", "link", "set", "usb0", "up"],["sysctl", "-w", "net.ipv4.ip_forward=1"],["iptables", "-t", "nat", "-F"],
                         ["iptables", "-F", "FORWARD"],["iptables", "-P", "FORWARD", "ACCEPT"],["iptables", "-t", "nat", "-A", "POSTROUTING", "-o", "wlan0", "-j", "MASQUERADE"]
                     ]
-                    
-                    for cmd in commands:
-                        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    for cmd in commands: subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
                     conf_path = "/tmp/zerocd_usb_dhcp.conf"
                     with open(conf_path, "w") as f:
-                        f.write("port=0\n")
-                        f.write("interface=usb0\n")
-                        f.write("dhcp-range=192.168.7.2,192.168.7.2,255.255.255.0,1h\n")
-                        f.write("dhcp-option=3,192.168.7.1\n")
-                        f.write("dhcp-option=6,8.8.8.8,1.1.1.1\n")
-                    
+                        f.write("port=0\ninterface=usb0\ndhcp-range=192.168.7.2,192.168.7.2,255.255.255.0,1h\n")
+                        f.write("dhcp-option=3,192.168.7.1\ndhcp-option=6,8.8.8.8,1.1.1.1\n")
                     subprocess.run(["dnsmasq", "-C", conf_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    self.logger.info("USB DHCP & NAT Router configured!")
-                except Exception as e:
-                    self.logger.error(f"Failed to start USB DHCP: {e}")
-                
+                except: pass
         threading.Thread(target=task, daemon=True).start()
-                
-        threading.Thread(target=task, daemon=True).start()
-                
+
     def init(self) -> bool:
         if os.geteuid() != 0: return False
         if not self._check_module("dwc2"):
@@ -271,8 +250,9 @@ class GadgetManager:
         self._udc = self._get_udc()
         if not self._udc: return False
         
-        if not self._create_gadget_structure(is_cdrom=True): return False
+        if not self._create_gadget_structure(is_cdrom=True, pure_mode=False): return False
         self._current_mode_is_cdrom = True
+        self._current_pure_mode = False
         self.state = GadgetState.CONFIGURED
         return True
 
@@ -282,7 +262,10 @@ class GadgetManager:
             udc_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/UDC'
             self._write_file(udc_file, self._udc)
             self.state = GadgetState.ACTIVE
-            self._setup_usb_network_dhcp()
+            
+            # Запускаем сеть, только если мы НЕ в Pure Mode
+            if not self._current_pure_mode:
+                self._setup_usb_network_dhcp()
             return True
         except: return False
 
@@ -307,26 +290,33 @@ class GadgetManager:
             return True
             
         is_cdrom = iso_path.lower().endswith('.iso')
+        pure_mode = '.pure.' in iso_path.lower() # МАГИЧЕСКИЙ ТРИГГЕР
         
         try:
-            needs_rebuild = getattr(self, '_current_mode_is_cdrom', None) != is_cdrom
+            needs_rebuild = (getattr(self, '_current_mode_is_cdrom', None) != is_cdrom) or \
+                            (getattr(self, '_current_pure_mode', None) != pure_mode)
+                            
             was_bound = (self.state == GadgetState.ACTIVE)
             lun0_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.0/file'
             
             if was_bound:
+                self.logger.info("Unbinding USB...")
                 self.unbind()
                 time.sleep(1.2)
             
             if needs_rebuild:
-                if not self._create_gadget_structure(is_cdrom=is_cdrom):
+                self.logger.info(f"Rebuilding gadget. CD-ROM: {is_cdrom}, PURE MODE: {pure_mode}")
+                if not self._create_gadget_structure(is_cdrom=is_cdrom, pure_mode=pure_mode):
                     return False
                 self._current_mode_is_cdrom = is_cdrom
+                self._current_pure_mode = pure_mode
                 
             self._write_file(lun0_file, '\n')
             time.sleep(0.5)
             self._write_file(lun0_file, iso_path)
             
             if was_bound:
+                self.logger.info("Rebinding USB...")
                 self.bind()
                 time.sleep(1.0)
             
