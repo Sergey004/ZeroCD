@@ -32,9 +32,13 @@ class GadgetManager:
         self._generate_hardware_ids()
 
     def _generate_hardware_ids(self):
+        # ИСПРАВЛЕНИЕ: Разные MAC-адреса для избежания конфликта в ядре Linux!
+        self._host_mac_rndis = "02:00:00:00:00:01"
+        self._dev_mac_rndis  = "06:00:00:00:00:02"
+        self._host_mac_ecm   = "12:00:00:00:00:03"
+        self._dev_mac_ecm    = "16:00:00:00:00:04"
         self._serial = "zerocd-123456"
-        self._host_mac = "02:00:00:00:00:01"
-        self._dev_mac  = "06:00:00:00:00:02"
+        
         try:
             with open('/proc/cpuinfo', 'r') as f:
                 for line in f:
@@ -44,8 +48,11 @@ class GadgetManager:
                         last_10 = self._serial[-10:]
                         pairs =[last_10[i:i+2] for i in range(0, 10, 2)]
                         base_mac = ":" + ":".join(pairs)
-                        self._host_mac = "02" + base_mac
-                        self._dev_mac  = "06" + base_mac
+                        
+                        self._host_mac_rndis = "02" + base_mac
+                        self._dev_mac_rndis  = "06" + base_mac
+                        self._host_mac_ecm   = "12" + base_mac
+                        self._dev_mac_ecm    = "16" + base_mac
                         break
         except: pass
 
@@ -155,7 +162,8 @@ class GadgetManager:
                 stall_val = '0' 
             else:
                 self._write_file(f'{gadget_path}/idVendor', '0x1d6b')
-                self._write_file(f'{gadget_path}/idProduct', '0x0105')
+                # ИСПРАВЛЕНИЕ: Новый PID (0x0106) сбросит кэш Ошибки 10 в Windows!
+                self._write_file(f'{gadget_path}/idProduct', '0x0106')
                 self._write_file(f'{gadget_path}/bDeviceClass', '0xEF')
                 self._write_file(f'{gadget_path}/bDeviceSubClass', '0x02')
                 self._write_file(f'{gadget_path}/bDeviceProtocol', '0x01')
@@ -199,21 +207,23 @@ class GadgetManager:
             os.symlink(ms_path, f'{config_path}/mass_storage.usb0')
 
             if not pure_mode and not apple_mode:
-                ecm_path = f'{gadget_path}/functions/ecm.usb0'
-                os.makedirs(ecm_path, exist_ok=True)
-                self._write_file(f'{ecm_path}/host_addr', self._host_mac)
-                self._write_file(f'{ecm_path}/dev_addr', self._dev_mac)
-                os.symlink(ecm_path, f'{config_path}/ecm.usb0')
-
+                # Настраиваем RNDIS для Windows
                 rndis_path = f'{gadget_path}/functions/rndis.usb0'
                 os.makedirs(rndis_path, exist_ok=True)
-                self._write_file(f'{rndis_path}/host_addr', self._host_mac)
-                self._write_file(f'{rndis_path}/dev_addr', self._dev_mac)
+                self._write_file(f'{rndis_path}/host_addr', self._host_mac_rndis)
+                self._write_file(f'{rndis_path}/dev_addr', self._dev_mac_rndis)
                 rndis_os_desc = f'{rndis_path}/os_desc/interface.rndis'
                 if os.path.exists(rndis_os_desc):
                     self._write_file(f'{rndis_os_desc}/compatible_id', 'RNDIS')
                     self._write_file(f'{rndis_os_desc}/sub_compatible_id', '5162001')
                 os.symlink(rndis_path, f'{config_path}/rndis.usb0')
+                
+                # Настраиваем ECM для Mac
+                ecm_path = f'{gadget_path}/functions/ecm.usb0'
+                os.makedirs(ecm_path, exist_ok=True)
+                self._write_file(f'{ecm_path}/host_addr', self._host_mac_ecm)
+                self._write_file(f'{ecm_path}/dev_addr', self._dev_mac_ecm)
+                os.symlink(ecm_path, f'{config_path}/ecm.usb0')
 
                 try: os.symlink(config_path, f'{gadget_path}/os_desc/c.1')
                 except: pass
@@ -228,37 +238,57 @@ class GadgetManager:
             with self._dhcp_lock:
                 if self.state != GadgetState.ACTIVE: return
                 for _ in range(20):
-                    if os.path.exists('/sys/class/net/usb0'): break
+                    # Ждем пока ядро поднимет оба интерфейса
+                    if os.path.exists('/sys/class/net/usb0') or os.path.exists('/sys/class/net/usb1'):
+                        time.sleep(1) # Даем секунду на инициализацию
+                        break
                     time.sleep(0.5)
                 if self.state != GadgetState.ACTIVE: return
 
                 try:
-                    self.logger.info("Starting USB DHCP and NAT...")
-                    # Тихий вызов команд (без разрушения терминала)
-                    os.system("pkill -9 -f zerocd_usb_dhcp.conf >/dev/null 2>&1")
-                    time.sleep(0.5)
+                    self.logger.info("Starting DUAL DHCP (Mac & Windows) and NAT...")
                     
-                    os.system("ip addr flush dev usb0 >/dev/null 2>&1")
-                    os.system("ip addr add 192.168.7.1/24 dev usb0 >/dev/null 2>&1")
-                    os.system("ip link set usb0 up >/dev/null 2>&1")
+                    subprocess.run(["pkill", "-9", "-f", "zerocd_usb_dhcp.conf"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     
-                    os.system("sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1")
-                    # Пробрасываем трафик только из нашей USB подсети
-                    os.system("iptables -t nat -A POSTROUTING -s 192.168.7.0/24 -o wlan0 -j MASQUERADE >/dev/null 2>&1")
+                    commands = [["sysctl", "-w", "net.ipv4.ip_forward=1"],
+                        ["iptables", "-t", "nat", "-F"],["iptables", "-F", "FORWARD"],
+                        ["iptables", "-P", "FORWARD", "ACCEPT"],["iptables", "-t", "nat", "-A", "POSTROUTING", "-o", "wlan0", "-j", "MASQUERADE"]
+                    ]
                     
+                    has_usb0 = os.path.exists('/sys/class/net/usb0')
+                    has_usb1 = os.path.exists('/sys/class/net/usb1')
+                    
+                    # Поднимаем первый интерфейс
+                    if has_usb0:
+                        commands.extend([
+                            ["ip", "addr", "flush", "dev", "usb0"],["ip", "addr", "add", "192.168.7.1/24", "dev", "usb0"],["ip", "link", "set", "usb0", "up"]
+                        ])
+                    
+                    # Поднимаем второй интерфейс
+                    if has_usb1:
+                        commands.extend([["ip", "addr", "flush", "dev", "usb1"],["ip", "addr", "add", "192.168.8.1/24", "dev", "usb1"],["ip", "link", "set", "usb1", "up"]
+                        ])
+                        
+                    for cmd in commands: 
+                        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+                    # Пишем "Умный" конфиг для двух сетей одновременно
                     conf = "/tmp/zerocd_usb_dhcp.conf"
                     with open(conf, "w") as f:
                         f.write("port=0\n")
-                        f.write("interface=usb0\n")
-                        # Жестко заставляем слушать ТОЛЬКО usb0
-                        f.write("listen-address=192.168.7.1\n")
-                        f.write("bind-interfaces\n")
-                        f.write("dhcp-range=192.168.7.2,192.168.7.2,255.255.255.0,1h\n")
-                        f.write("dhcp-option=3,192.168.7.1\n")
+                        f.write("bind-dynamic\n")
+                        if has_usb0:
+                            f.write("interface=usb0\n")
+                            f.write("dhcp-range=set:net7,192.168.7.2,192.168.7.2,255.255.255.0,1h\n")
+                            f.write("dhcp-option=tag:net7,3,192.168.7.1\n")
+                        if has_usb1:
+                            f.write("interface=usb1\n")
+                            f.write("dhcp-range=set:net8,192.168.8.2,192.168.8.2,255.255.255.0,1h\n")
+                            f.write("dhcp-option=tag:net8,3,192.168.8.1\n")
                         f.write("dhcp-option=6,8.8.8.8,1.1.1.1\n")
                         
-                    os.system(f"dnsmasq -C {conf} >/dev/null 2>&1")
-                    self.logger.info("USB Network ready!")
+                    subprocess.run(["dnsmasq", "-C", conf], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    self.logger.info(f"USB Network ready! (usb0: {has_usb0}, usb1: {has_usb1})")
                 except Exception as e:
                     self.logger.error(f"DHCP Error: {e}")
         threading.Thread(target=task, daemon=True).start()
@@ -273,6 +303,9 @@ class GadgetManager:
         if not self._udc: return False
         
         if not self._create_gadget_structure(is_cdrom=True, pure_mode=False, apple_mode=False): return False
+        self._current_mode_is_cdrom = True
+        self._current_pure_mode = False
+        self._current_apple_mode = False
         self.state = GadgetState.CONFIGURED
         return True
 
@@ -283,8 +316,7 @@ class GadgetManager:
             self._write_file(udc_file, self._udc)
             self.state = GadgetState.ACTIVE
             
-            # Запускаем сеть только в режиме комбайна
-            if "ZeroCD + LAN" in open(f'/sys/kernel/config/usb_gadget/{self.gadget_name}/strings/0x409/product').read():
+            if not self._current_pure_mode and not self._current_apple_mode:
                 self._setup_usb_network_dhcp()
             return True
         except: return False
@@ -322,11 +354,9 @@ class GadgetManager:
             was_bound = (self.state == GadgetState.ACTIVE)
             lun0_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.0/file'
             
-            # === ЖЕСТКИЙ ХОЛОДНЫЙ СВАП ВСЕГДА ===
             if was_bound:
                 self.logger.info("Unbinding USB (Cold Swap)...")
                 self.unbind()
-                # 3 СЕКУНДЫ — это время, необходимое драйверу Windows, чтобы выгрузить старое устройство! Не уменьшать!
                 time.sleep(3.0)
             
             self.logger.info("Rebuilding gadget structure completely...")
