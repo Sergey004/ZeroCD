@@ -31,6 +31,7 @@ class GadgetManager:
         self._current_pure_mode = False
         self._current_apple_mode = False  # <--- Флаг для нашей пасхалки
         self._dhcp_lock = threading.Lock()
+        self._gadget_lock = threading.Lock()  # <--- НОВЫЙ ЗАМОК ДЛЯ USB
         
         self._generate_hardware_ids()
 
@@ -316,16 +317,20 @@ class GadgetManager:
             return False
             
         iso_path = os.path.abspath(iso_path)
-        if getattr(self, 'current_iso', None) == iso_path:
-            return True
+        
+        # ЗАЩИТА ОТ СПАМА КНОПКОЙ: Если мы уже меняем диск, игнорируем новые клики
+        if not self._gadget_lock.acquire(blocking=False):
+            self.logger.warning("USB operation in progress, ignoring rapid swap request.")
+            return False
             
-        is_cdrom = iso_path.lower().endswith('.iso')
-        
-        # Детектор режимов
-        apple_mode = '.apple.' in iso_path.lower()
-        pure_mode = '.pure.' in iso_path.lower()
-        
         try:
+            if getattr(self, 'current_iso', None) == iso_path:
+                return True
+                
+            is_cdrom = iso_path.lower().endswith('.iso')
+            apple_mode = '.apple.' in iso_path.lower()
+            pure_mode = '.pure.' in iso_path.lower()
+            
             needs_rebuild = (getattr(self, '_current_mode_is_cdrom', None) != is_cdrom) or \
                             (getattr(self, '_current_pure_mode', None) != pure_mode) or \
                             (getattr(self, '_current_apple_mode', None) != apple_mode)
@@ -333,33 +338,45 @@ class GadgetManager:
             was_bound = (self.state == GadgetState.ACTIVE)
             lun0_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.0/file'
             
-            if was_bound:
-                self.logger.info("Unbinding USB...")
-                self.unbind()
-                time.sleep(1.2)
-            
-            if needs_rebuild:
-                self.logger.info(f"Rebuilding gadget. CD-ROM: {is_cdrom}, PURE: {pure_mode}, APPLE: {apple_mode}")
-                if not self._create_gadget_structure(is_cdrom=is_cdrom, pure_mode=pure_mode, apple_mode=apple_mode):
-                    return False
-                self._current_mode_is_cdrom = is_cdrom
-                self._current_pure_mode = pure_mode
-                self._current_apple_mode = apple_mode
+            # --- ХОЛОДНАЯ ЗАМЕНА (Полное отключение USB) ---
+            # Требуется только для перестройки структуры или если мы вставляем .IMG флешку
+            if needs_rebuild or not is_cdrom:
+                self.logger.info("Performing COLD SWAP (USB Restart required)...")
+                if was_bound:
+                    self.unbind()
+                    # КРИТИЧНО ДЛЯ WINDOWS: Ждем 2 полные секунды, чтобы NDIS драйвер корректно выгрузился!
+                    time.sleep(2.0)
                 
-            self._write_file(lun0_file, '\n')
-            time.sleep(0.5)
-            self._write_file(lun0_file, iso_path)
-            
-            if was_bound:
-                self.logger.info("Rebinding USB...")
-                self.bind()
-                time.sleep(1.0)
-            
+                if needs_rebuild:
+                    self.logger.info("Rebuilding USB gadget structure...")
+                    if not self._create_gadget_structure(is_cdrom=is_cdrom, pure_mode=pure_mode, apple_mode=apple_mode):
+                        return False
+                    self._current_mode_is_cdrom = is_cdrom
+                    self._current_pure_mode = pure_mode
+                    self._current_apple_mode = apple_mode
+                    
+                self._write_file(lun0_file, iso_path)
+                
+                if was_bound:
+                    self.bind()
+                    
+            # --- ГОРЯЧАЯ ЗАМЕНА (Без отключения сети) ---
+            # Работает только для ISO -> ISO. USB кабель остается в компьютере!
+            else:
+                self.logger.info("Performing HOT SWAP (Ejecting virtual CD tray)...")
+                self._write_file(lun0_file, '\n')
+                time.sleep(1.5) # Даем ОС время понять, что лоток дисковода открыт
+                self._write_file(lun0_file, iso_path)
+                
             self.current_iso = iso_path
             return True
             
         except Exception as e:
+            self.logger.error(f"Failed to set image: {e}")
             return False
+        finally:
+            # Обязательно снимаем блокировку в конце
+            self._gadget_lock.release()
 
     def shutdown(self):
         self.unbind()
