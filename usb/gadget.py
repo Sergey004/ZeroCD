@@ -6,7 +6,6 @@ import os
 import subprocess
 import time
 import threading
-import traceback
 from enum import Enum
 from typing import Optional, Dict, Any
 from system.logger import get_logger
@@ -27,11 +26,8 @@ class GadgetManager:
         self.config_name = "c.1"
         self.function_name = "mass_storage.usb0"
         self._udc = None
-        self._current_mode_is_cdrom = True
-        self._current_pure_mode = False
-        self._current_apple_mode = False  # <--- Флаг для нашей пасхалки
         self._dhcp_lock = threading.Lock()
-        self._gadget_lock = threading.Lock()  # <--- НОВЫЙ ЗАМОК ДЛЯ USB
+        self._gadget_lock = threading.Lock()
         
         self._generate_hardware_ids()
 
@@ -39,7 +35,6 @@ class GadgetManager:
         self._serial = "zerocd-123456"
         self._host_mac = "02:00:00:00:00:01"
         self._dev_mac  = "06:00:00:00:00:02"
-        
         try:
             with open('/proc/cpuinfo', 'r') as f:
                 for line in f:
@@ -55,8 +50,7 @@ class GadgetManager:
         except: pass
 
     def _check_module(self, module_name):
-        try:
-            return module_name in subprocess.run(['lsmod'], capture_output=True, text=True).stdout
+        try: return module_name in subprocess.run(['lsmod'], capture_output=True, text=True).stdout
         except: return False
 
     def _load_module(self, module_name):
@@ -122,14 +116,13 @@ class GadgetManager:
             except: pass
         return True
 
-    def _write_file(self, path: str, content: str, retries=3):
-        for attempt in range(retries):
+    def _write_file(self, path: str, content: str):
+        for attempt in range(3):
             try:
                 with open(path, 'w') as f: f.write(content)
                 return
             except OSError as e:
-                if e.errno == 16 and attempt < retries - 1:
-                    time.sleep(0.5)
+                if e.errno == 16 and attempt < 2: time.sleep(0.5)
                 else: raise
 
     def _create_gadget_structure(self, is_cdrom: bool = True, pure_mode: bool = False, apple_mode: bool = False) -> bool:
@@ -142,22 +135,16 @@ class GadgetManager:
             self._write_file(f'{gadget_path}/bcdDevice', '0x0100')
             self._write_file(f'{gadget_path}/bcdUSB', '0x0200')
 
-            # === ВЫБОР РОЛИ УСТРОЙСТВА ===
             if apple_mode:
-                # ПАСХАЛКА: Триггерим DRM-защиту Apple!
-                self.logger.info("Building PURE STORAGE gadget (Apple SuperDrive Easter Egg!)")
                 self._write_file(f'{gadget_path}/idVendor', '0x05ac')  
                 self._write_file(f'{gadget_path}/idProduct', '0x1500') 
                 self._write_file(f'{gadget_path}/bDeviceClass', '0x00')
                 self._write_file(f'{gadget_path}/bDeviceSubClass', '0x00')
                 self._write_file(f'{gadget_path}/bDeviceProtocol', '0x00')
                 mfg_name = 'Apple Inc.'
-                prod_name = 'Apple USB SuperDrive Drive'
+                prod_name = 'Apple USB SuperDrive'
                 stall_val = '0' 
-                
             elif pure_mode:
-                # РАБОЧИЙ РЕЖИМ: Безымянный дисковод для старых Маков
-                self.logger.info("Building PURE STORAGE gadget (Generic DVD Spoof)")
                 self._write_file(f'{gadget_path}/idVendor', '0x1d6b')  
                 self._write_file(f'{gadget_path}/idProduct', '0x0104') 
                 self._write_file(f'{gadget_path}/bDeviceClass', '0x00')
@@ -166,10 +153,7 @@ class GadgetManager:
                 mfg_name = 'Generic'
                 prod_name = 'USB Optical Drive'
                 stall_val = '0' 
-                
             else:
-                # СТАНДАРТ: Наш крутой комбайн с сетью
-                self.logger.info("Building COMPOSITE gadget (Storage + Network)")
                 self._write_file(f'{gadget_path}/idVendor', '0x1d6b')
                 self._write_file(f'{gadget_path}/idProduct', '0x0105')
                 self._write_file(f'{gadget_path}/bDeviceClass', '0xEF')
@@ -190,13 +174,9 @@ class GadgetManager:
             config_path = f'{gadget_path}/configs/{self.config_name}'
             os.makedirs(config_path, exist_ok=True)
             os.makedirs(f'{config_path}/strings/0x409', exist_ok=True)
-            
-            # Название конфига тоже меняется для реалистичности
-            cfg_name = 'Storage Only' if (pure_mode or apple_mode) else 'CD-ROM + LAN'
-            self._write_file(f'{config_path}/strings/0x409/configuration', cfg_name)
+            self._write_file(f'{config_path}/strings/0x409/configuration', 'Storage Only' if (pure_mode or apple_mode) else 'CD-ROM + LAN')
             self._write_file(f'{config_path}/MaxPower', '250')
 
-            # 1. СОЗДАЕМ ДИСКОВОД
             ms_path = f'{gadget_path}/functions/mass_storage.usb0'
             os.makedirs(ms_path, exist_ok=True)
             time.sleep(0.1)
@@ -211,19 +191,13 @@ class GadgetManager:
                 self._write_file(f'{lun0_path}/ro', '1')
                 self._write_file(f'{lun0_path}/cdrom', '1')
                 self._write_file(f'{lun0_path}/nofua', '0')
-                #if apple_mode:
-               #     self._write_file(f'{lun0_path}/inquiry_string', 'Apple   SuperDrive Drive')
-               # else:
-                #    self._write_file(f'{lun0_path}/inquiry_string', 'ZeroCD  CD-ROM')
             else:
                 self._write_file(f'{lun0_path}/removable', '0')
                 self._write_file(f'{lun0_path}/ro', '0')
                 self._write_file(f'{lun0_path}/cdrom', '0')
                 self._write_file(f'{lun0_path}/nofua', '1')
-                #self._write_file(f'{lun0_path}/inquiry_string', 'ZeroCD USB Flash Drive')
             os.symlink(ms_path, f'{config_path}/mass_storage.usb0')
 
-            # 2. ДОБАВЛЯЕМ СЕТЬ ТОЛЬКО ЕСЛИ ЭТО ОБЫЧНЫЙ РЕЖИМ
             if not pure_mode and not apple_mode:
                 ecm_path = f'{gadget_path}/functions/ecm.usb0'
                 os.makedirs(ecm_path, exist_ok=True)
@@ -252,23 +226,41 @@ class GadgetManager:
     def _setup_usb_network_dhcp(self):
         def task():
             with self._dhcp_lock:
-                for _ in range(15):
-                    time.sleep(0.5)
+                if self.state != GadgetState.ACTIVE: return
+                for _ in range(20):
                     if os.path.exists('/sys/class/net/usb0'): break
-                try:
-                    subprocess.run(["pkill", "-9", "-f", "zerocd_usb_dhcp.conf"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     time.sleep(0.5)
-                    commands = [["ip", "addr", "flush", "dev", "usb0"],["ip", "addr", "add", "192.168.7.1/24", "dev", "usb0"],["ip", "link", "set", "usb0", "up"],["sysctl", "-w", "net.ipv4.ip_forward=1"],["iptables", "-t", "nat", "-F"],
-                        ["iptables", "-F", "FORWARD"],["iptables", "-P", "FORWARD", "ACCEPT"],["iptables", "-t", "nat", "-A", "POSTROUTING", "-o", "wlan0", "-j", "MASQUERADE"]
-                    ]
-                    for cmd in commands: subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if self.state != GadgetState.ACTIVE: return
 
-                    conf_path = "/tmp/zerocd_usb_dhcp.conf"
-                    with open(conf_path, "w") as f:
-                        f.write("port=0\ninterface=usb0\ndhcp-range=192.168.7.2,192.168.7.2,255.255.255.0,1h\n")
-                        f.write("dhcp-option=3,192.168.7.1\ndhcp-option=6,8.8.8.8,1.1.1.1\n")
-                    subprocess.run(["dnsmasq", "-C", conf_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                except: pass
+                try:
+                    self.logger.info("Starting USB DHCP and NAT...")
+                    # Тихий вызов команд (без разрушения терминала)
+                    os.system("pkill -9 -f zerocd_usb_dhcp.conf >/dev/null 2>&1")
+                    time.sleep(0.5)
+                    
+                    os.system("ip addr flush dev usb0 >/dev/null 2>&1")
+                    os.system("ip addr add 192.168.7.1/24 dev usb0 >/dev/null 2>&1")
+                    os.system("ip link set usb0 up >/dev/null 2>&1")
+                    
+                    os.system("sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1")
+                    # Пробрасываем трафик только из нашей USB подсети
+                    os.system("iptables -t nat -A POSTROUTING -s 192.168.7.0/24 -o wlan0 -j MASQUERADE >/dev/null 2>&1")
+                    
+                    conf = "/tmp/zerocd_usb_dhcp.conf"
+                    with open(conf, "w") as f:
+                        f.write("port=0\n")
+                        f.write("interface=usb0\n")
+                        # Жестко заставляем слушать ТОЛЬКО usb0
+                        f.write("listen-address=192.168.7.1\n")
+                        f.write("bind-interfaces\n")
+                        f.write("dhcp-range=192.168.7.2,192.168.7.2,255.255.255.0,1h\n")
+                        f.write("dhcp-option=3,192.168.7.1\n")
+                        f.write("dhcp-option=6,8.8.8.8,1.1.1.1\n")
+                        
+                    os.system(f"dnsmasq -C {conf} >/dev/null 2>&1")
+                    self.logger.info("USB Network ready!")
+                except Exception as e:
+                    self.logger.error(f"DHCP Error: {e}")
         threading.Thread(target=task, daemon=True).start()
 
     def init(self) -> bool:
@@ -281,9 +273,6 @@ class GadgetManager:
         if not self._udc: return False
         
         if not self._create_gadget_structure(is_cdrom=True, pure_mode=False, apple_mode=False): return False
-        self._current_mode_is_cdrom = True
-        self._current_pure_mode = False
-        self._current_apple_mode = False
         self.state = GadgetState.CONFIGURED
         return True
 
@@ -294,8 +283,8 @@ class GadgetManager:
             self._write_file(udc_file, self._udc)
             self.state = GadgetState.ACTIVE
             
-            # Сеть не запускаем, если включен любой из "чистых" режимов
-            if not self._current_pure_mode and not self._current_apple_mode:
+            # Запускаем сеть только в режиме комбайна
+            if "ZeroCD + LAN" in open(f'/sys/kernel/config/usb_gadget/{self.gadget_name}/strings/0x409/product').read():
                 self._setup_usb_network_dhcp()
             return True
         except: return False
@@ -318,9 +307,8 @@ class GadgetManager:
             
         iso_path = os.path.abspath(iso_path)
         
-        # ЗАЩИТА ОТ СПАМА КНОПКОЙ: Если мы уже меняем диск, игнорируем новые клики
         if not self._gadget_lock.acquire(blocking=False):
-            self.logger.warning("USB operation in progress, ignoring rapid swap request.")
+            self.logger.warning("Swap in progress, ignoring...")
             return False
             
         try:
@@ -331,51 +319,34 @@ class GadgetManager:
             apple_mode = '.apple.' in iso_path.lower()
             pure_mode = '.pure.' in iso_path.lower()
             
-            needs_rebuild = (getattr(self, '_current_mode_is_cdrom', None) != is_cdrom) or \
-                            (getattr(self, '_current_pure_mode', None) != pure_mode) or \
-                            (getattr(self, '_current_apple_mode', None) != apple_mode)
-                            
             was_bound = (self.state == GadgetState.ACTIVE)
             lun0_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.0/file'
             
-            # --- ХОЛОДНАЯ ЗАМЕНА (Полное отключение USB) ---
-            # Требуется только для перестройки структуры или если мы вставляем .IMG флешку
-            if needs_rebuild or not is_cdrom:
-                self.logger.info("Performing COLD SWAP (USB Restart required)...")
-                if was_bound:
-                    self.unbind()
-                    # КРИТИЧНО ДЛЯ WINDOWS: Ждем 2 полные секунды, чтобы NDIS драйвер корректно выгрузился!
-                    time.sleep(2.0)
+            # === ЖЕСТКИЙ ХОЛОДНЫЙ СВАП ВСЕГДА ===
+            if was_bound:
+                self.logger.info("Unbinding USB (Cold Swap)...")
+                self.unbind()
+                # 3 СЕКУНДЫ — это время, необходимое драйверу Windows, чтобы выгрузить старое устройство! Не уменьшать!
+                time.sleep(3.0)
+            
+            self.logger.info("Rebuilding gadget structure completely...")
+            if not self._create_gadget_structure(is_cdrom=is_cdrom, pure_mode=pure_mode, apple_mode=apple_mode):
+                return False
                 
-                if needs_rebuild:
-                    self.logger.info("Rebuilding USB gadget structure...")
-                    if not self._create_gadget_structure(is_cdrom=is_cdrom, pure_mode=pure_mode, apple_mode=apple_mode):
-                        return False
-                    self._current_mode_is_cdrom = is_cdrom
-                    self._current_pure_mode = pure_mode
-                    self._current_apple_mode = apple_mode
-                    
-                self._write_file(lun0_file, iso_path)
-                
-                if was_bound:
-                    self.bind()
-                    
-            # --- ГОРЯЧАЯ ЗАМЕНА (Без отключения сети) ---
-            # Работает только для ISO -> ISO. USB кабель остается в компьютере!
-            else:
-                self.logger.info("Performing HOT SWAP (Ejecting virtual CD tray)...")
-                self._write_file(lun0_file, '\n')
-                time.sleep(1.5) # Даем ОС время понять, что лоток дисковода открыт
-                self._write_file(lun0_file, iso_path)
-                
+            self._write_file(lun0_file, iso_path)
+            
+            if was_bound:
+                self.logger.info("Rebinding USB...")
+                self.bind()
+            
             self.current_iso = iso_path
+            self.logger.info("Swap complete!")
             return True
             
         except Exception as e:
             self.logger.error(f"Failed to set image: {e}")
             return False
         finally:
-            # Обязательно снимаем блокировку в конце
             self._gadget_lock.release()
 
     def shutdown(self):
