@@ -235,9 +235,10 @@ class GadgetManager:
                     self._write_file(f'{lun0_path}/inquiry_string', 'ZeroCD  USB Flash Drive')
 
                 # Симлинки в правильном порядке
+                os.symlink(ms_path, f'{config_path}/mass_storage.usb0')
                 os.symlink(rndis_path, f'{config_path}/rndis.usb0')
                 os.symlink(ecm_path, f'{config_path}/ecm.usb0')
-                os.symlink(ms_path, f'{config_path}/mass_storage.usb0')
+                
 
                 try:
                     os.symlink(config_path, f'{gadget_path}/os_desc/c.1')
