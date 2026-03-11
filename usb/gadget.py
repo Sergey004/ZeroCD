@@ -232,7 +232,7 @@ class GadgetManager:
                     self._write_file(f'{lun0_path}/ro', '0')
                     self._write_file(f'{lun0_path}/cdrom', '0')
                     self._write_file(f'{lun0_path}/nofua', '1')
-                    self._write_file(f'{lun0_path}/inquiry_string', 'ZeroCD USB Flash Drive')
+                    self._write_file(f'{lun0_path}/inquiry_string', 'ZeroCD  USB Flash Drive')
 
                 # Симлинки в правильном порядке
                 os.symlink(rndis_path, f'{config_path}/rndis.usb0')
