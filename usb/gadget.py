@@ -196,7 +196,7 @@ class GadgetManager:
 
                 self._write_file(f'{rndis_path}/host_addr', self._host_mac_rndis)
                 self._write_file(f'{rndis_path}/dev_addr', self._dev_mac_rndis)
-                self._write_file(f'{rndis_path}/wceis', '1')  # ← важный флаг для Win10/11
+                #self._write_file(f'{rndis_path}/wceis', '1')  # ← важный флаг для Win10/11
 
                 # OS descriptors для Windows (теперь всегда создаём)
                 rndis_os_desc = f'{rndis_path}/os_desc/interface.rndis'
