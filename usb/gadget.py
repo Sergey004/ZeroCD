@@ -211,7 +211,7 @@ class GadgetManager:
                 self._write_file(f'{lun0_path}/cdrom', '1')
                 self._write_file(f'{lun0_path}/nofua', '0')
                 if apple_mode:
-                    self._write_file(f'{lun0_path}/inquiry_string', 'Apple  SuperDrive Drive')
+                    self._write_file(f'{lun0_path}/inquiry_string', 'Apple   SuperDrive Drive')
                 else:
                     self._write_file(f'{lun0_path}/inquiry_string', 'ZeroCD  CD-ROM')
             else:
