@@ -135,40 +135,42 @@ class GadgetManager:
         gadget_path = f'/sys/kernel/config/usb_gadget/{self.gadget_name}'
         try:
             self._safe_cleanup_gadget()
-            time.sleep(0.5)
+            time.sleep(0.7)  # чуть больше стабильности после очистки
             os.makedirs(gadget_path, exist_ok=True)
 
             self._write_file(f'{gadget_path}/bcdDevice', '0x0100')
             self._write_file(f'{gadget_path}/bcdUSB', '0x0200')
 
             if apple_mode:
-                self._write_file(f'{gadget_path}/idVendor', '0x05ac')  
-                self._write_file(f'{gadget_path}/idProduct', '0x1500') 
+                self._write_file(f'{gadget_path}/idVendor', '0x05ac')
+                self._write_file(f'{gadget_path}/idProduct', '0x1500')
                 self._write_file(f'{gadget_path}/bDeviceClass', '0x00')
                 self._write_file(f'{gadget_path}/bDeviceSubClass', '0x00')
                 self._write_file(f'{gadget_path}/bDeviceProtocol', '0x00')
                 mfg_name = 'Apple Inc.'
                 prod_name = 'Apple USB SuperDrive'
-                stall_val = '0' 
+                stall_val = '0'
             elif pure_mode:
-                self._write_file(f'{gadget_path}/idVendor', '0x1d6b')  
-                self._write_file(f'{gadget_path}/idProduct', '0x0104') 
+                self._write_file(f'{gadget_path}/idVendor', '0x1d6b')
+                self._write_file(f'{gadget_path}/idProduct', '0x0104')
                 self._write_file(f'{gadget_path}/bDeviceClass', '0x00')
                 self._write_file(f'{gadget_path}/bDeviceSubClass', '0x00')
                 self._write_file(f'{gadget_path}/bDeviceProtocol', '0x00')
                 mfg_name = 'Generic'
                 prod_name = 'USB Optical Drive'
-                stall_val = '0' 
+                stall_val = '0'
             else:
                 self._write_file(f'{gadget_path}/idVendor', '0x1d6b')
-                # === НОВЫЙ PID ДЛЯ СБРОСА КЭША WINDOWS ===
-                self._write_file(f'{gadget_path}/idProduct', '0x0111')
+                self._write_file(f'{gadget_path}/idProduct', '0x0111')  # твой PID для сброса кэша Windows
                 self._write_file(f'{gadget_path}/bDeviceClass', '0xEF')
                 self._write_file(f'{gadget_path}/bDeviceSubClass', '0x02')
                 self._write_file(f'{gadget_path}/bDeviceProtocol', '0x01')
+
+                # OS Descriptors (критично для RNDIS!)
                 self._write_file(f'{gadget_path}/os_desc/use', '1')
                 self._write_file(f'{gadget_path}/os_desc/b_vendor_code', '0xcd')
                 self._write_file(f'{gadget_path}/os_desc/qw_sign', 'MSFT100')
+
                 mfg_name = 'ZeroCD'
                 prod_name = 'ZeroCD + LAN'
                 stall_val = '1'
@@ -181,61 +183,99 @@ class GadgetManager:
             config_path = f'{gadget_path}/configs/{self.config_name}'
             os.makedirs(config_path, exist_ok=True)
             os.makedirs(f'{config_path}/strings/0x409', exist_ok=True)
-            self._write_file(f'{config_path}/strings/0x409/configuration', 'Storage Only' if (pure_mode or apple_mode) else 'CD-ROM + LAN')
+            self._write_file(f'{config_path}/strings/0x409/configuration', 
+                             'Storage Only' if (pure_mode or apple_mode) else 'CD-ROM + LAN')
             self._write_file(f'{config_path}/MaxPower', '250')
 
-            ms_path = f'{gadget_path}/functions/mass_storage.usb0'
-            os.makedirs(ms_path, exist_ok=True)
-            time.sleep(0.1)
-            self._write_file(f'{ms_path}/stall', stall_val)
-            
-            lun0_path = f'{ms_path}/lun.0'
-            os.makedirs(lun0_path, exist_ok=True)
-            time.sleep(0.2)
-
-            if is_cdrom:
-                self._write_file(f'{lun0_path}/removable', '1')
-                self._write_file(f'{lun0_path}/ro', '1')
-                self._write_file(f'{lun0_path}/cdrom', '1')
-                self._write_file(f'{lun0_path}/nofua', '0')
-                if apple_mode:
-                    self._write_file(f'{lun0_path}/inquiry_string', 'Apple   SuperDrive Drive')
-                else:
-                    self._write_file(f'{lun0_path}/inquiry_string', 'ZeroCD  CD-ROM')
-            else:
-                self._write_file(f'{lun0_path}/removable', '0')
-                self._write_file(f'{lun0_path}/ro', '0')
-                self._write_file(f'{lun0_path}/cdrom', '0')
-                self._write_file(f'{lun0_path}/nofua', '1')
-                self._write_file(f'{lun0_path}/inquiry_string', 'ZeroCD USB Flash Drive')
-
-            os.symlink(ms_path, f'{config_path}/mass_storage.usb0')
-
+            # === ИСПРАВЛЕНИЕ: RNDIS ПЕРВЫМ (Windows любит именно такой порядок) ===
             if not pure_mode and not apple_mode:
+                # 1. RNDIS
                 rndis_path = f'{gadget_path}/functions/rndis.usb0'
                 os.makedirs(rndis_path, exist_ok=True)
+                time.sleep(0.2)
+
                 self._write_file(f'{rndis_path}/host_addr', self._host_mac_rndis)
                 self._write_file(f'{rndis_path}/dev_addr', self._dev_mac_rndis)
+                self._write_file(f'{rndis_path}/wceis', '1')  # ← важный флаг для Win10/11
+
+                # OS descriptors для Windows (теперь всегда создаём)
                 rndis_os_desc = f'{rndis_path}/os_desc/interface.rndis'
-                if os.path.exists(rndis_os_desc):
-                    self._write_file(f'{rndis_os_desc}/compatible_id', 'RNDIS')
-                    self._write_file(f'{rndis_os_desc}/sub_compatible_id', '5162001')
-                os.symlink(rndis_path, f'{config_path}/rndis.usb0')
-                
+                os.makedirs(rndis_os_desc, exist_ok=True)
+                self._write_file(f'{rndis_os_desc}/compatible_id', 'RNDIS')
+                self._write_file(f'{rndis_os_desc}/sub_compatible_id', '5162001')
+
+                # 2. ECM (для Linux/macOS)
                 ecm_path = f'{gadget_path}/functions/ecm.usb0'
                 os.makedirs(ecm_path, exist_ok=True)
                 self._write_file(f'{ecm_path}/host_addr', self._host_mac_ecm)
                 self._write_file(f'{ecm_path}/dev_addr', self._dev_mac_ecm)
-                os.symlink(ecm_path, f'{config_path}/ecm.usb0')
 
-                try: os.symlink(config_path, f'{gadget_path}/os_desc/c.1')
-                except: pass
+                # 3. Mass Storage (последним)
+                ms_path = f'{gadget_path}/functions/mass_storage.usb0'
+                os.makedirs(ms_path, exist_ok=True)
+                time.sleep(0.1)
+                self._write_file(f'{ms_path}/stall', stall_val)
+
+                lun0_path = f'{ms_path}/lun.0'
+                os.makedirs(lun0_path, exist_ok=True)
+                time.sleep(0.2)
+
+                # настройка LUN (оставляем как было)
+                if is_cdrom:
+                    self._write_file(f'{lun0_path}/removable', '1')
+                    self._write_file(f'{lun0_path}/ro', '1')
+                    self._write_file(f'{lun0_path}/cdrom', '1')
+                    self._write_file(f'{lun0_path}/nofua', '0')
+                    self._write_file(f'{lun0_path}/inquiry_string', 'ZeroCD  CD-ROM')
+                else:
+                    self._write_file(f'{lun0_path}/removable', '0')
+                    self._write_file(f'{lun0_path}/ro', '0')
+                    self._write_file(f'{lun0_path}/cdrom', '0')
+                    self._write_file(f'{lun0_path}/nofua', '1')
+                    self._write_file(f'{lun0_path}/inquiry_string', 'ZeroCD USB Flash Drive')
+
+                # Симлинки в правильном порядке
+                os.symlink(rndis_path, f'{config_path}/rndis.usb0')
+                os.symlink(ecm_path, f'{config_path}/ecm.usb0')
+                os.symlink(ms_path, f'{config_path}/mass_storage.usb0')
+
+                try:
+                    os.symlink(config_path, f'{gadget_path}/os_desc/c.1')
+                except:
+                    pass
+
+            else:
+                # pure/Apple режим — только mass_storage
+                ms_path = f'{gadget_path}/functions/mass_storage.usb0'
+                os.makedirs(ms_path, exist_ok=True)
+                time.sleep(0.1)
+                self._write_file(f'{ms_path}/stall', stall_val)
+                # ... (остальной код LUN как выше)
+                lun0_path = f'{ms_path}/lun.0'
+                os.makedirs(lun0_path, exist_ok=True)
+                time.sleep(0.2)
+                # настройка LUN (копипаст из if is_cdrom выше)
+                if is_cdrom:
+                    self._write_file(f'{lun0_path}/removable', '1')
+                    self._write_file(f'{lun0_path}/ro', '1')
+                    self._write_file(f'{lun0_path}/cdrom', '1')
+                    self._write_file(f'{lun0_path}/nofua', '0')
+                    self._write_file(f'{lun0_path}/inquiry_string', 
+                                     'Apple   SuperDrive Drive' if apple_mode else 'ZeroCD  CD-ROM')
+                else:
+                    self._write_file(f'{lun0_path}/removable', '0')
+                    self._write_file(f'{lun0_path}/ro', '0')
+                    self._write_file(f'{lun0_path}/cdrom', '0')
+                    self._write_file(f'{lun0_path}/nofua', '1')
+                    self._write_file(f'{lun0_path}/inquiry_string', 'ZeroCD USB Flash Drive')
+
+                os.symlink(ms_path, f'{config_path}/mass_storage.usb0')
 
             return True
         except Exception as e:
             self.logger.error(f"Gadget structure failed: {e}")
             return False
-
+        
     def _setup_usb_network_dhcp(self):
         def task():
             with self._dhcp_lock:
