@@ -33,7 +33,6 @@ class GadgetManager:
         self._current_mode_is_cdrom = True
         self._current_pure_mode = False
         self._current_apple_mode = False
-        self._current_network_first = False
 
     def _check_and_load(self, mod):
         if mod not in subprocess.run(['lsmod'], capture_output=True, text=True).stdout:
@@ -61,7 +60,7 @@ class GadgetManager:
         self._udc = self._get_udc()
         if not self._udc: return False
         
-        if not self.builder.build(self.net_mgr, is_cdrom=True, pure_mode=False, apple_mode=False, network_first=False): 
+        if not self.builder.build(self.net_mgr, is_cdrom=True, pure_mode=False, apple_mode=False): 
             return False
             
         self.state = GadgetState.CONFIGURED
@@ -145,7 +144,7 @@ class GadgetManager:
             return False
         finally:
             self._gadget_lock.release()
-            
+
     def shutdown(self):
         self.unbind()
         self.builder.cleanup()
