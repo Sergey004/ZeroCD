@@ -46,11 +46,12 @@ class GadgetBuilder:
                     os.rmdir(fp)
                 except: pass
 
-        for p in[f"{gadget_path}/os_desc/c.1", f"{gadget_path}/strings/0x409", gadget_path]:
-            try: os.unlink(p) if os.path.islink(p) else os.rmdir(p)
-            except: pass
+        try: os.rmdir(f"{gadget_path}/strings/0x409")
+        except: pass
+        try: os.rmdir(gadget_path)
+        except: pass
 
-    def build(self, net_mgr, is_cdrom=True, pure_mode=False, apple_mode=False, network_first=False):
+    def build(self, net_mgr, is_cdrom=True, pure_mode=False, apple_mode=False):
         self.cleanup()
         time.sleep(0.5)
         
@@ -76,15 +77,17 @@ class GadgetBuilder:
             self.write_file(f'{gp}/bDeviceProtocol', '0x00')
             mfg, prod, stall = 'Generic', 'USB Optical Drive', '0'
         else:
+            # === СТАНДАРТНЫЙ РЕЖИМ (CD-ROM + NCM Network) ===
             self.write_file(f'{gp}/idVendor', '0x1d6b')
-            self.write_file(f'{gp}/idProduct', '0x0112') # Меняем, чтобы обновить кэш Windows
+            # Устанавливаем новый PID 0x0120 (чтобы Windows 11 загрузила NCM-драйвер с нуля)
+            self.write_file(f'{gp}/idProduct', '0x0120')
+            
+            # Стандартные флаги композитного устройства
             self.write_file(f'{gp}/bDeviceClass', '0xEF')
             self.write_file(f'{gp}/bDeviceSubClass', '0x02')
             self.write_file(f'{gp}/bDeviceProtocol', '0x01')
-            self.write_file(f'{gp}/os_desc/use', '1')
-            self.write_file(f'{gp}/os_desc/b_vendor_code', '0xcd')
-            self.write_file(f'{gp}/os_desc/qw_sign', 'MSFT100')
-            mfg, prod, stall = 'ZeroCD', 'ZeroCD + LAN', '1'
+            
+            mfg, prod, stall = 'ZeroCD', 'ZeroCD Combo (NCM)', '1'
 
         os.makedirs(f'{gp}/strings/0x409', exist_ok=True)
         self.write_file(f'{gp}/strings/0x409/manufacturer', mfg)
@@ -93,10 +96,10 @@ class GadgetBuilder:
 
         os.makedirs(cp, exist_ok=True)
         os.makedirs(f'{cp}/strings/0x409', exist_ok=True)
-        self.write_file(f'{cp}/strings/0x409/configuration', 'Storage Only' if (pure_mode or apple_mode) else 'CD-ROM + LAN')
+        self.write_file(f'{cp}/strings/0x409/configuration', 'Storage Only' if (pure_mode or apple_mode) else 'Storage + NCM Network')
         self.write_file(f'{cp}/MaxPower', '250')
 
-        # Подготовка Storage
+        # 1. ПОДГОТОВКА STORAGE (ОН ВСЕГДА ПЕРВЫЙ!)
         ms_path = f'{gp}/functions/mass_storage.usb0'
         os.makedirs(ms_path, exist_ok=True)
         time.sleep(0.1)
@@ -112,38 +115,20 @@ class GadgetBuilder:
         inquiry = 'Apple   SuperDrive Drive' if apple_mode else ('ZeroCD  CD-ROM' if is_cdrom else 'ZeroCD  Flash Drive')
         self.write_file(f'{lun0}/inquiry_string', inquiry)
 
-        # Подготовка Network
-        rndis_path = f'{gp}/functions/rndis.usb0'
-        ecm_path = f'{gp}/functions/ecm.usb0'
-        
+        # 2. ПОДГОТОВКА СЕТИ NCM
+        ncm_path = None
         if not pure_mode and not apple_mode:
-            os.makedirs(rndis_path, exist_ok=True)
-            self.write_file(f'{rndis_path}/host_addr', net_mgr.host_mac_rndis)
-            self.write_file(f'{rndis_path}/dev_addr', net_mgr.dev_mac_rndis)
-            os.makedirs(f'{rndis_path}/os_desc/interface.rndis', exist_ok=True)
-            self.write_file(f'{rndis_path}/os_desc/interface.rndis/compatible_id', 'RNDIS')
-            self.write_file(f'{rndis_path}/os_desc/interface.rndis/sub_compatible_id', '5162001')
+            ncm_path = f'{gp}/functions/ncm.usb0'
+            os.makedirs(ncm_path, exist_ok=True)
+            self.write_file(f'{ncm_path}/host_addr', net_mgr.host_mac)
+            self.write_file(f'{ncm_path}/dev_addr', net_mgr.dev_mac)
 
-            os.makedirs(ecm_path, exist_ok=True)
-            self.write_file(f'{ecm_path}/host_addr', net_mgr.host_mac_ecm)
-            self.write_file(f'{ecm_path}/dev_addr', net_mgr.dev_mac_ecm)
+        # === ИДЕАЛЬНЫЙ ПОРЯДОК ИНТЕРФЕЙСОВ ===
+        # BIOS рад (дисковод первый). Windows рада (ей плевать, где находится NCM). 
+        os.symlink(ms_path, f'{cp}/mass_storage.usb0')
+        
+        if ncm_path:
+            self.logger.info("Linking NCM Network adapter...")
+            os.symlink(ncm_path, f'{cp}/ncm.usb0')
 
-        # === ТОТ САМЫЙ ПОРЯДОК ИНТЕРФЕЙСОВ ===
-        if pure_mode or apple_mode:
-            os.symlink(ms_path, f'{cp}/mass_storage.usb0')
-        else:
-            if network_first:
-                self.logger.info("Linking order: NETWORK FIRST (Optimized for Windows RNDIS)")
-                os.symlink(rndis_path, f'{cp}/rndis.usb0')
-                os.symlink(ecm_path, f'{cp}/ecm.usb0')
-                os.symlink(ms_path, f'{cp}/mass_storage.usb0')
-            else:
-                self.logger.info("Linking order: STORAGE FIRST (Optimized for BIOS Booting)")
-                os.symlink(ms_path, f'{cp}/mass_storage.usb0')
-                os.symlink(rndis_path, f'{cp}/rndis.usb0')
-                os.symlink(ecm_path, f'{cp}/ecm.usb0')
-            
-            try: os.symlink(cp, f'{gp}/os_desc/c.1')
-            except: pass
-            
         return True

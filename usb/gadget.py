@@ -108,15 +108,10 @@ class GadgetManager:
             apple_mode = '.apple.' in iso_path.lower()
             pure_mode = '.pure.' in iso_path.lower()
             
-            # === МАГИЯ ПОРЯДКА ИНТЕРФЕЙСОВ ===
-            # .iso = Storage First (Boot mode)
-            # .img или .net.iso = Network First (Windows mode)
-            network_first = '.net.' in iso_path.lower() or not is_cdrom
-            
+            # УБРАЛИ ХАК network_first!
             needs_rebuild = (self._current_mode_is_cdrom != is_cdrom) or \
                             (self._current_pure_mode != pure_mode) or \
-                            (self._current_apple_mode != apple_mode) or \
-                            (self._current_network_first != network_first)
+                            (self._current_apple_mode != apple_mode)
                             
             was_bound = (self.state == GadgetState.ACTIVE)
             lun0_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.0/file'
@@ -128,12 +123,12 @@ class GadgetManager:
             
             if needs_rebuild:
                 self.logger.info("Rebuilding gadget structure...")
-                if not self.builder.build(self.net_mgr, is_cdrom, pure_mode, apple_mode, network_first):
+                # Вызываем build без network_first
+                if not self.builder.build(self.net_mgr, is_cdrom, pure_mode, apple_mode):
                     return False
                 self._current_mode_is_cdrom = is_cdrom
                 self._current_pure_mode = pure_mode
                 self._current_apple_mode = apple_mode
-                self._current_network_first = network_first
                 
             self.builder.write_file(lun0_file, iso_path)
             
@@ -150,7 +145,7 @@ class GadgetManager:
             return False
         finally:
             self._gadget_lock.release()
-
+            
     def shutdown(self):
         self.unbind()
         self.builder.cleanup()
