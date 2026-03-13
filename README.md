@@ -8,8 +8,8 @@ DIY USB CD-ROM and LAN adapter for Raspberry Pi Zero 2 W
 
 ## Features
 
-- **USB Gadget Mode** - CD-ROM emulation via USB
-- **USB Ethernet** - Network adapter via USB (RNDIS) (WIP)
+- **USB Gadget Mode** - CD-ROM emulation via USB (And Apple SuperDrive "emulation" - just for fun)
+- **USB Ethernet** - Network adapter via USB (CDC NCM Win 10+) 
 - **1.3" ST7789 LCD** - Menu and status display
 - **WiFi Management** - ISO upload via WebUI (WIP)
 - **Captive Portal** - WiFi setup without network connection (WIP)
@@ -53,7 +53,7 @@ Installer will automatically:
 sudo python3 main.py
 ```
 
-### PC Emulation Mode
+### PC Emulation Mode (Will be removed, because is don't work)
 
 ```bash
 ZEROCD_PLATFORM=pc python3 main.py
@@ -63,14 +63,14 @@ ZEROCD_PLATFORM=pc python3 main.py
 
 | Button | Action |
 |--------|--------|
-| w/s | Navigate up/down |
-| Enter | Select ISO |
-| d | WiFi menu |
-| q | Quit |
+| UP/DOWN | Navigate up/down |
+| PRESS | Select ISO |
+| RIGHT| WiFi menu |
+| LEFT | MTP Mode for image upload |
 
 ## WebUI
 
-WebUI is only available when WiFi is connected and NOT in USB Gadget mode (to save power).
+WebUI is only available when WiFi is connected OR is connected to host 
 
 ### Access
 
@@ -97,7 +97,7 @@ IP address is shown on display when connected to WiFi.
 - Linux Mint
 - Netboot.xyz
 
-## WiFi and Captive Portal
+## WiFi and Captive Portal (WIP)
 
 ### Auto-start Captive Portal
 
@@ -115,7 +115,7 @@ If no saved network is found at boot, access point (Captive Portal) starts autom
 
 LCD displays QR code for quick connection to access point.
 
-## Project Structure
+## Project Structure (Will be edited)
 
 ```
 ZeroCD/
@@ -143,7 +143,7 @@ ZeroCD/
     └── logger.py     # Logging
 ```
 
-## Known Limitations
+## Known Limitations (Will be edited)
 
 1. **Pi Zero 2 W only** - requires built-in WiFi adapter
 2. **USB Gadget Mode** - WebUI disabled to save power
