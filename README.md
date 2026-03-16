@@ -9,7 +9,7 @@ DIY USB CD-ROM and LAN adapter for Raspberry Pi Zero 2 W
 ## Features
 
 - **USB Gadget Mode** - CD-ROM emulation via USB (And Apple SuperDrive "emulation" - just for fun)
-- **USB Ethernet** - Network adapter via USB (CDC NCM Win 10+) 
+- **USB Ethernet** - Network adapter via USB (CDC NCM Win 10+)
 - **1.3" ST7789 LCD** - Menu and status display
 - **WiFi Management** - ISO upload via WebUI (WIP)
 - **Captive Portal** - WiFi setup without network connection (WIP)
@@ -53,11 +53,6 @@ Installer will automatically:
 sudo python3 main.py
 ```
 
-### PC Emulation Mode (Will be removed, because is don't work)
-
-```bash
-ZEROCD_PLATFORM=pc python3 main.py
-```
 
 ### Controls
 
@@ -67,9 +62,14 @@ ZEROCD_PLATFORM=pc python3 main.py
 | PRESS | Select ISO |
 | RIGHT| WiFi menu |
 | LEFT | MTP Mode for image upload |
+| UP/DOWN | Navigate up/down |
+| PRESS | Select ISO |
+| RIGHT| WiFi menu |
+| LEFT | MTP Mode for image upload |
 
 ## WebUI
 
+WebUI is only available when WiFi is connected OR is connected to host 
 WebUI is only available when WiFi is connected OR is connected to host 
 
 ### Access
@@ -98,6 +98,7 @@ IP address is shown on display when connected to WiFi.
 - Netboot.xyz
 
 ## WiFi and Captive Portal (WIP)
+## WiFi and Captive Portal (WIP)
 
 ### Auto-start Captive Portal
 
@@ -115,6 +116,7 @@ If no saved network is found at boot, access point (Captive Portal) starts autom
 
 LCD displays QR code for quick connection to access point.
 
+## Project Structure (Will be edited)
 ## Project Structure (Will be edited)
 
 ```
@@ -144,24 +146,12 @@ ZeroCD/
 ```
 
 ## Known Limitations (Will be edited)
+## Known Limitations (Will be edited)
 
 1. **Pi Zero 2 W only** - requires built-in WiFi adapter
 2. **USB Gadget Mode** - WebUI disabled to save power
 3. **Single network profile** - only one WiFi network is saved
 
-## Development
-
-### Test UI on PC
-
-```bash
-python test_display.py --interactive
-```
-
-### Test renderer
-
-```bash
-python test_display.py --renderer
-```
 
 ## License
 
@@ -169,6 +159,10 @@ GPL-3.0 license
 
 ## Credits
 
-- [Raspyjack](https://github.com/7h30th3r0n3/Raspyjack) - UI and WebUI inspiration
 - [Waveshare](https://www.waveshare.com) - ST7789 driver
 - [Font Awesome](https://fontawesome.com) - Icons
+
+
+---
+
+If you want "True ODDE" check this [usbode-circle](https://github.com/danifunker/usbode-circle)

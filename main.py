@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """
 ZeroCD - DIY USB CD-ROM and LAN adapter for Raspberry Pi Zero 2 W
-
-PC Mode: Set ZEROCD_PLATFORM=pc to run with curses TUI
 """
 
 import signal
@@ -10,25 +8,15 @@ import sys
 import os
 import subprocess
 
-from config import ISO_DIR, USE_PC_EMULATION, TEST_ISO_DIR, BACKLIGHT_TIMEOUT_SECONDS, BACKLIGHT_FADE_STEPS, BACKLIGHT_FADE_STEP_MS
+from config import ISO_DIR, BACKLIGHT_TIMEOUT_SECONDS, BACKLIGHT_FADE_STEPS, BACKLIGHT_FADE_STEP_MS
 from system.logger import setup_logger, get_logger
 
-if USE_PC_EMULATION:
-    from ui.display_pc import DisplayPC
-    from ui.menu import Menu
-    from input.joystick_pc import JoystickPC, Direction
-    from usb.iso_manager import ISOManager
-    from net.wifi import WiFiManager
-    from usb.gadget_pc import GadgetManagerPC
-    ISO_DIR = TEST_ISO_DIR
-else:
-    from ui.display import Display
-    from ui.menu import Menu
-    from input.joystick import Joystick, Direction
-    from usb.iso_manager import ISOManager
-    from net.wifi import WiFiManager
-    from usb.gadget import GadgetManager
-    
+from ui.display import Display
+from ui.menu import Menu
+from input.joystick import Joystick, Direction
+from usb.iso_manager import ISOManager
+from net.wifi import WiFiManager
+from usb.gadget import GadgetManager
 
 
 class ZeroCDApp:
@@ -51,44 +39,36 @@ class ZeroCDApp:
         self.backlight_on = True
 
     def init(self) -> bool:
-        self.logger.info(f"Initializing ZeroCD (PC mode: {USE_PC_EMULATION})")
+        self.logger.info("Initializing ZeroCD")
         setup_logger()
 
         self.iso_manager = ISOManager(ISO_DIR)
         self.iso_list = self.iso_manager.list_isos()
         self.logger.info(f"Found {len(self.iso_list)} ISO files")
 
-        if USE_PC_EMULATION:
-            self.display = DisplayPC()
-            self.joystick = JoystickPC(self.on_joystick_event)
-            self.gadget = GadgetManagerPC()
+        self.display = Display()
+        if not self.display.init():
+            self.logger.error("Failed to initialize display")
+            return False
+
+        self.joystick = Joystick(disp=self.display, callback=self.on_joystick_event)
+
+        self.gadget = GadgetManager()
+        if not self.gadget.init():
+            self.logger.error("Failed to initialize USB gadget - continuing without USB support")
         else:
-            self.display = Display()
-            if not self.display.init():
-                self.logger.error("Failed to initialize display")
-                return False
-            
-            # Pass display to joystick for button reading
-            self.joystick = Joystick(disp=self.display, callback=self.on_joystick_event)
-                      
-            self.gadget = GadgetManager()
-            if not self.gadget.init():
-                self.logger.error("Failed to initialize USB gadget - continuing without USB support")
+            self.logger.info("USB gadget initialized, binding to UDC...")
+            if self.gadget.bind():
+                self.usb_connected = True
+                self.logger.info("USB gadget bound to UDC")
             else:
-                self.logger.info("USB gadget initialized, binding to UDC...")
-                if self.gadget.bind():
-                    self.usb_connected = True
-                    self.logger.info("USB gadget bound to UDC")
-                else:
-                    self.logger.error("Failed to bind USB gadget to UDC")
-                    
+                self.logger.error("Failed to bind USB gadget to UDC")
 
         self.display.show_splash()
 
         self.last_activity_time = self.get_time()
         self.backlight_on = True
-        if not USE_PC_EMULATION:
-            self.display.fade_in(target_duty=50, steps=BACKLIGHT_FADE_STEPS, step_delay_ms=BACKLIGHT_FADE_STEP_MS)
+        self.display.fade_in(target_duty=50, steps=BACKLIGHT_FADE_STEPS, step_delay_ms=BACKLIGHT_FADE_STEP_MS)
 
         self.menu = Menu(self.iso_list, self.on_iso_selected)
         if self.iso_list:
@@ -97,26 +77,20 @@ class ZeroCDApp:
         self.wifi = WiFiManager()
 
         self.logger.info("ZeroCD initialization complete")
-        
-        # Загружаем первый образ из списка по умолчанию
+
         if self.iso_list:
             self.on_iso_selected(self.iso_list[0])
-            
-        # === ЗАПУСКАЕМ WEB UI В ФОНОВОМ ПОТОКЕ ===
-        if not USE_PC_EMULATION:
-            try:
-                import threading
-                from web.server import start_webui
-                # Запускаем Flask в отдельном потоке, чтобы он не заблокировал меню и джойстик
-                web_thread = threading.Thread(target=start_webui, args=(self,), daemon=True)
-                web_thread.start()
-                self.logger.info("WebUI background thread started")
-            except Exception as e:
-                self.logger.error(f"Failed to start WebUI: {e}")
-        # ========================================
+
+        try:
+            import threading
+            from web.server import start_webui
+            web_thread = threading.Thread(target=start_webui, args=(self,), daemon=True)
+            web_thread.start()
+            self.logger.info("WebUI background thread started")
+        except Exception as e:
+            self.logger.error(f"Failed to start WebUI: {e}")
 
         return True
-        
 
 
     def on_iso_selected(self, iso_name: str):
@@ -149,7 +123,7 @@ class ZeroCDApp:
     def reset_activity(self):
         """Reset activity timer and turn on backlight if needed."""
         self.last_activity_time = self.get_time()
-        if not self.backlight_on and not USE_PC_EMULATION:
+        if not self.backlight_on:
             self.backlight_on = True
             self.display.fade_in(target_duty=50, steps=BACKLIGHT_FADE_STEPS, step_delay_ms=BACKLIGHT_FADE_STEP_MS)
 
@@ -160,7 +134,7 @@ class ZeroCDApp:
 
     def check_backlight_timeout(self):
         """Check and handle backlight timeout."""
-        if USE_PC_EMULATION or not self.backlight_on:
+        if not self.backlight_on:
             return
         elapsed = self.get_time() - self.last_activity_time
         if elapsed >= BACKLIGHT_TIMEOUT_SECONDS:
@@ -169,18 +143,16 @@ class ZeroCDApp:
 
     def toggle_wifi(self):
         self.logger.info("WiFi toggle requested")
-        
-        # Защита от отсутствия железа Wi-Fi
+
         if not hasattr(self, 'wifi') or not self.wifi.has_wifi_support():
             self.logger.warning("No WiFi hardware available to toggle.")
             return
 
         try:
-            # Импортируем состояния, чтобы знать текущий статус
             from net.wifi import WiFiState
-            
+
             current_state = self.wifi.get_status()
-            
+
             if current_state == WiFiState.CONNECTED:
                 self.logger.info("WiFi is connected. Disconnecting...")
                 self.wifi.disconnect()
@@ -189,88 +161,76 @@ class ZeroCDApp:
                 self.wifi.connect()
             elif current_state == WiFiState.AP_MODE:
                 self.logger.info("WiFi is in AP mode. Stopping AP and connecting to network...")
-                # Если у вас логика выключения портала через captive, можно добавить сюда остановку captive
                 self.wifi.stop_ap_mode()
                 self.wifi.connect()
             else:
                 self.logger.info(f"WiFi is currently {current_state.value}. Please wait.")
-                
+
         except Exception as e:
             self.logger.error(f"Error toggling WiFi: {e}")
 
     def toggle_mtp(self):
         self.logger.info("MTP toggle requested")
-        
-        # Команда запуска вашего uMTP-Responder
-        MTP_COMMAND = "umtprd" 
-        
+
+        MTP_COMMAND = "umtprd"
+
         if not self.mtp_enabled:
             self.logger.info("Switching to MTP mode...")
-            
-            # 1. Отключаем CD-ROM гаджет и освобождаем USB-кабель
+
             if self.gadget:
                 self.gadget.shutdown()
                 self.usb_connected = False
-            
+
             import time
             time.sleep(0.5)
-            
-            # 2. Создаем "скелет" MTP устройства в ядре Linux (ConfigFS)
+
             self.logger.info("Setting up MTP USB Gadget...")
             os.system("sudo mkdir -p /sys/kernel/config/usb_gadget/mtp")
             os.system("sudo sh -c 'echo 0x1D6B > /sys/kernel/config/usb_gadget/mtp/idVendor'")
             os.system("sudo sh -c 'echo 0x0100 > /sys/kernel/config/usb_gadget/mtp/idProduct'")
-            
+
             os.system("sudo mkdir -p /sys/kernel/config/usb_gadget/mtp/strings/0x409")
             os.system("sudo sh -c 'echo \"ZeroCD\" > /sys/kernel/config/usb_gadget/mtp/strings/0x409/manufacturer'")
             os.system("sudo sh -c 'echo \"ZeroCD MTP\" > /sys/kernel/config/usb_gadget/mtp/strings/0x409/product'")
-            
+
             os.system("sudo mkdir -p /sys/kernel/config/usb_gadget/mtp/configs/c.1/strings/0x409")
             os.system("sudo sh -c 'echo \"MTP\" > /sys/kernel/config/usb_gadget/mtp/configs/c.1/strings/0x409/configuration'")
-            
-            # 3. Указываем, что это будет FunctionFS (чтобы C++ мог перехватить управление)
+
             os.system("sudo mkdir -p /sys/kernel/config/usb_gadget/mtp/functions/ffs.mtp")
             os.system("sudo ln -s /sys/kernel/config/usb_gadget/mtp/functions/ffs.mtp /sys/kernel/config/usb_gadget/mtp/configs/c.1/")
-            
-            # 4. Монтируем конечные точки (те самые ep0, ep1, ep2) для uMTP-Responder
+
             os.system("sudo mkdir -p /dev/ffs-mtp")
             os.system("sudo mount -t functionfs mtp /dev/ffs-mtp")
-            
-            # 5. Запускаем C++ программу
+
             try:
                 self.mtp_process = subprocess.Popen(["sudo", MTP_COMMAND])
                 self.mtp_enabled = True
                 self.logger.info("uMTP-Responder started. Waiting for endpoints...")
-                
-                # Даем C++ программе 1 секунду, чтобы она прописала дескрипторы в ep0
+
                 time.sleep(1)
-                
-                # 6. Включаем USB! Ищем UDC контроллер и привязываем его к нашему MTP
+
                 udc_list = os.listdir("/sys/class/udc/")
                 if udc_list:
                     udc = udc_list[0]
                     os.system(f"sudo sh -c 'echo {udc} > /sys/kernel/config/usb_gadget/mtp/UDC'")
                     self.logger.info(f"MTP connected to USB ({udc})")
-                
+
             except Exception as e:
                 self.logger.error(f"Failed to start MTP: {e}")
                 self.mtp_enabled = False
-                
+
         else:
             self.logger.info("Stopping MTP mode and restoring CD-ROM...")
-            
-            # 1. Отключаем MTP гаджет от ПК
+
             os.system("sudo sh -c 'echo \"\n\" > /sys/kernel/config/usb_gadget/mtp/UDC'")
             import time
             time.sleep(0.5)
-            
-            # 2. Убиваем C++ программу
+
             if hasattr(self, 'mtp_process') and self.mtp_process:
                 self.mtp_process.terminate()
-            os.system(f"sudo pkill -9 {MTP_COMMAND}")
-            self.mtp_enabled = False
-            
-            # 3. Размонтируем ep0-ep3 и удаляем MTP гаджет из системы
+                os.system(f"sudo pkill -9 {MTP_COMMAND}")
+                self.mtp_enabled = False
+
             os.system("sudo umount /dev/ffs-mtp")
             os.system("sudo rm /sys/kernel/config/usb_gadget/mtp/configs/c.1/ffs.mtp")
             os.system("sudo rmdir /sys/kernel/config/usb_gadget/mtp/configs/c.1/strings/0x409")
@@ -278,39 +238,32 @@ class ZeroCDApp:
             os.system("sudo rmdir /sys/kernel/config/usb_gadget/mtp/functions/ffs.mtp")
             os.system("sudo rmdir /sys/kernel/config/usb_gadget/mtp/strings/0x409")
             os.system("sudo rmdir /sys/kernel/config/usb_gadget/mtp")
-            
+
             time.sleep(0.5)
-            
-            # 4. Заново инициализируем наш CD-ROM + Сеть гаджет
+
             if self.gadget:
                 if self.gadget.init():
                     if self.gadget.bind():
                         self.usb_connected = True
-            
-            # 5. ОБНОВЛЯЕМ СПИСОК ISO-ОБРАЗОВ
+
             self.logger.info("Refreshing ISO list after MTP session...")
             self.iso_list = self.iso_manager.list_isos()
             self.logger.info(f"Found {len(self.iso_list)} ISO files")
-            
-            # Пересоздаем меню с новыми файлами
+
             self.menu = Menu(self.iso_list, self.on_iso_selected)
-            
-            # Проверяем, не удалил ли пользователь наш активный образ
+
             if self.active_iso not in self.iso_list:
                 self.logger.info("Previous active ISO was removed or renamed.")
                 self.active_iso = self.iso_list[0] if self.iso_list else None
-            
-            # 6. Возвращаем активный образ обратно в дисковод
+
             if self.active_iso and self.usb_connected:
                 iso_path = self.iso_manager.get_iso_path(self.active_iso)
                 if iso_path:
                     self.gadget.set_iso(iso_path)
-            
-            # Принудительно обновляем экран, чтобы новые файлы появились в списке
+
             self.update_display()
             self.logger.info("CD-ROM mode restored successfully")
 
-            
     def update_display(self):
         if self.display:
             self.display.draw_menu(
@@ -329,31 +282,14 @@ class ZeroCDApp:
         self.running = True
         self.logger.info("Starting ZeroCD main loop")
 
-        if USE_PC_EMULATION:
-            if self.display and hasattr(self.display, 'stdscr') and self.display.stdscr:
-                self.joystick.start_polling(self.on_joystick_event, self.display.stdscr)
-            else:
-                self.joystick.start_polling(self.on_joystick_event)
-        else:
-            # Start joystick polling - if it was created successfully, it should work
-            try:
-                self.joystick.start_polling(self.on_joystick_event)
-                self.logger.info("Joystick polling started")
-            except Exception as e:
-                self.logger.warning(f"Joystick not available: {e}, USB CD-ROM mode only")
+        try:
+            self.joystick.start_polling(self.on_joystick_event)
+            self.logger.info("Joystick polling started")
+        except Exception as e:
+            self.logger.warning(f"Joystick not available: {e}, USB CD-ROM mode only")
 
         self.update_display()
-
-        if USE_PC_EMULATION:
-            self._run_pc_loop()
-        else:
-            self._run_pi_loop()
-
-    def _run_pc_loop(self):
-        """PC mode: wait for quit."""
-        import time
-        while self.running:
-            time.sleep(0.05)
+        self._run_pi_loop()
 
     def _run_pi_loop(self):
         """Pi mode: check backlight timeout."""
@@ -380,32 +316,17 @@ class ZeroCDApp:
 
         self.logger.info("ZeroCD shutdown complete")
 
-
-def main():
-    def signal_handler(signum, frame):
-        app = globals().get('app')
-        if app:
-            app.logger.info(f"Received signal {signum}")
-            app.shutdown()
+    def main():
+        def signal_handler(signum, frame):
+            app = globals().get('app')
+            if app:
+                app.logger.info(f"Received signal {signum}")
+                app.shutdown()
             sys.exit(0)
 
-    signal.signal(signal.SIGTERM, signal_handler)
-    signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGINT, signal_handler)
 
-    if USE_PC_EMULATION and sys.stdout.isatty():
-        import curses
-
-        def curses_main(stdscr):
-            global app
-            app = ZeroCDApp()
-            if app.init():
-                app.run()
-            else:
-                app.logger.error("Failed to initialize ZeroCD")
-                sys.exit(1)
-
-        curses.wrapper(curses_main)
-    else:
         global app
         app = ZeroCDApp()
         if app.init():
@@ -414,6 +335,5 @@ def main():
             app.logger.error("Failed to initialize ZeroCD")
             sys.exit(1)
 
-
-if __name__ == "__main__":
-    main()
+    if __name__ == "__main__":
+        main()

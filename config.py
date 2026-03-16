@@ -32,7 +32,6 @@ DISPLAY_HEIGHT = 240
 
 # ISO storage
 ISO_DIR = "/mnt/iso_storage"
-TEST_ISO_DIR = "/tmp/iso_storage"
 
 # USB Gadget configuration
 GADGET_DIR = "/sys/kernel/config/usb_gadget/zerocd"
@@ -70,10 +69,6 @@ MENU_ITEMS_PER_PAGE = 5
 BACKLIGHT_TIMEOUT_SECONDS = 120
 BACKLIGHT_FADE_STEPS = 20
 BACKLIGHT_FADE_STEP_MS = 50
-
-# Platform detection
-PLATFORM = os.environ.get("ZEROCD_PLATFORM", "pi")
-USE_PC_EMULATION = PLATFORM == "pc"
 
 # Popular ISO URLs for download
 POPULAR_ISOS = [

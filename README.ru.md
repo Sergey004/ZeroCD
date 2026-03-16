@@ -4,7 +4,7 @@ DIY USB CD-ROM и LAN адаптер на Raspberry Pi Zero 2 W
 
 ![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi%20Zero%202%20W-green)
 ![Python](https://img.shields.io/badge/python-3.9+-blue)
-![License](https://img.shields.io/badge/license-MIT-orange)
+![License](https://img.shields.io/badge/license-GPL-orange)
 
 ## Возможности
 
@@ -31,7 +31,7 @@ DIY USB CD-ROM и LAN адаптер на Raspberry Pi Zero 2 W
 ```bash
 # Клонировать репозиторий
 cd /opt
-sudo git clone https://github.com/your-repo/ZeroCD.git
+sudo git clone https://github.com/Sergey004/ZeroCD
 cd ZeroCD
 
 # Запустить установщик
@@ -51,12 +51,6 @@ sudo ./install.sh
 
 ```bash
 sudo python3 main.py
-```
-
-### Режим эмуляции на PC
-
-```bash
-ZEROCD_PLATFORM=pc python3 main.py
 ```
 
 ### Управление
@@ -119,28 +113,38 @@ IP адрес отображается на дисплее при подключ
 
 ```
 ZeroCD/
-├── config.py          # Конфигурация
-├── main.py            # Главная программа
-├── install.sh         # Скрипт установки
-├── requirements.txt   # Python зависимости
-├── ui/                # UI для LCD
-│   ├── display.py     # ST7789 драйвер
-│   ├── display_pc.py # Эмулятор для PC
-│   ├── renderer.py   # Рендеринг текста и иконок
-│   └── menu.py       # Обработка меню
-├── net/               # Сетевые функции
-│   ├── wifi.py       # WiFi менеджер
-│   └── captive.py    # Captive Portal
-├── web/               # WebUI
-│   ├── server.py     # Flask сервер
-│   └── templates/    # HTML шаблоны
-├── usb/               # USB Gadget
-│   ├── gadget.py     # USB настройка
-│   └── iso_manager.py# Управление ISO
-├── input/             # Ввод
-│   └── joystick.py   # GPIO джойстик
-└── system/            # Система
-    └── logger.py     # Логирование
+├── config.py # Конфигурация
+├── main.py # Главная программа
+├── install.sh # Скрипт установки
+├── install_net.sh # Скрипт установки сети
+├── requirements.txt # Python зависимости
+├── splash.py # Заставка при запуске
+├── ui/ # UI для LCD
+│ ├── display.py # ST7789 драйвер
+│ ├── renderer.py # Рендеринг текста и иконок
+│ └── menu.py # Обработка меню
+├── net/ # Сетевые функции
+│ ├── wifi.py # WiFi менеджер
+│ ├── captive.py # Captive Portal
+│ └── nat.py # NAT конфигурация
+├── web/ # WebUI
+│ ├── server.py # Flask сервер
+│ └── __init__.py
+├── usb/ # USB Gadget
+│ ├── gadget.py # USB настройка
+│ ├── iso_manager.py# Управление ISO
+│ ├── builder.py # Сборщик гаджета
+│ └── network.py # USB сеть (RNDIS)
+├── input/ # Ввод
+│ └── joystick.py # GPIO джойстик
+├── system/ # Система
+│ ├── logger.py # Логирование
+│ └── service_install.sh # Установка сервиса
+├── scripts/ # Скрипты установки
+│ ├── install_fonts.sh # Установка шрифтов
+│ └── setup_mtp.sh # Настройка MTP
+└── uMTP-Responder/ # MTP responder
+    └── conf/ # Конфигурационные файлы
 ```
 
 ## Известные ограничения
@@ -151,24 +155,11 @@ ZeroCD/
 
 ## Разработка
 
-### Тестирование UI на PC
-
-```bash
-python test_display.py --interactive
-```
-
-### Тестирование рендерера
-
-```bash
-python test_display.py --renderer
-```
-
 ## Лицензия
 
-MIT License
+GPL-3.0 license
 
 ## Благодарности
 
-- [Raspyjack](https://github.com/who-is-hu/Raspyjack) - вдохновение для UI и WebUI
 - [Waveshare](https://www.waveshare.com) - драйвер ST7789
 - [Font Awesome](https://fontawesome.com) - иконки
