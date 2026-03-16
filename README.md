@@ -62,14 +62,9 @@ sudo python3 main.py
 | PRESS | Select ISO |
 | RIGHT| WiFi menu |
 | LEFT | MTP Mode for image upload |
-| UP/DOWN | Navigate up/down |
-| PRESS | Select ISO |
-| RIGHT| WiFi menu |
-| LEFT | MTP Mode for image upload |
 
 ## WebUI
 
-WebUI is only available when WiFi is connected OR is connected to host 
 WebUI is only available when WiFi is connected OR is connected to host 
 
 ### Access
@@ -98,7 +93,6 @@ IP address is shown on display when connected to WiFi.
 - Netboot.xyz
 
 ## WiFi and Captive Portal (WIP)
-## WiFi and Captive Portal (WIP)
 
 ### Auto-start Captive Portal
 
@@ -116,7 +110,6 @@ If no saved network is found at boot, access point (Captive Portal) starts autom
 
 LCD displays QR code for quick connection to access point.
 
-## Project Structure (Will be edited)
 ## Project Structure (Will be edited)
 
 ```
@@ -145,7 +138,6 @@ ZeroCD/
     └── logger.py     # Logging
 ```
 
-## Known Limitations (Will be edited)
 ## Known Limitations (Will be edited)
 
 1. **Pi Zero 2 W only** - requires built-in WiFi adapter
