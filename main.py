@@ -316,24 +316,26 @@ class ZeroCDApp:
 
         self.logger.info("ZeroCD shutdown complete")
 
-    def main():
-        def signal_handler(signum, frame):
-            app = globals().get('app')
-            if app:
-                app.logger.info(f"Received signal {signum}")
-                app.shutdown()
-            sys.exit(0)
 
-        signal.signal(signal.SIGTERM, signal_handler)
-        signal.signal(signal.SIGINT, signal_handler)
+def main():
+    def signal_handler(signum, frame):
+        app = globals().get('app')
+        if app:
+            app.logger.info(f"Received signal {signum}")
+            app.shutdown()
+        sys.exit(0)
 
-        global app
-        app = ZeroCDApp()
-        if app.init():
-            app.run()
-        else:
-            app.logger.error("Failed to initialize ZeroCD")
-            sys.exit(1)
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
 
-    if __name__ == "__main__":
-        main()
+    global app
+    app = ZeroCDApp()
+    if app.init():
+        app.run()
+    else:
+        app.logger.error("Failed to initialize ZeroCD")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
