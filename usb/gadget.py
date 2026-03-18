@@ -117,7 +117,7 @@ class GadgetManager:
                 subprocess.run(["cdemu", "unload", "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 time.sleep(0.5)
                 
-                res = subprocess.run(["cdemu", "load", "0", iso_path], capture_output=True, text=True)
+                res = subprocess.run(["cdemu", "--bus", "system", "load", "0", iso_path], capture_output=True, text=True)
                 if res.returncode != 0:
                     self.logger.error(f"CDEmu load failed: {res.stderr}")
                     return False
