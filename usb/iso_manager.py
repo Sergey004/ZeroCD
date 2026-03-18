@@ -17,11 +17,11 @@ class ISOManager:
         self.logger = get_logger("iso_manager")
         self.directory = Path(directory)
         
-        # Поддерживаемые расширения файлов (Теперь мы всеядны благодаря CDEmu!)
-        self.valid_extensions =['.iso', '.img', '.cue', '.dmg', '.nrg', '.mdf', '.bin']
+        # Поддерживаемые расширения файлов
+        self.valid_extensions = ['.iso', '.img']
 
     def list_isos(self) -> List[str]:
-        """List all valid files in directory."""
+        """List all valid ISO/IMG files in directory."""
         if not self.directory.exists():
             self.logger.warning(f"Image directory not found: {self.directory}")
             return []

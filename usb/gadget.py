@@ -103,32 +103,12 @@ class GadgetManager:
             if getattr(self, 'current_iso', None) == iso_path:
                 return True
                 
-            # --- УМНЫЙ МАРШРУТИЗАТОР ФОРМАТОВ ---
-            ext = iso_path.lower()
-            is_optical = ext.endswith(('.iso', '.cue', '.dmg', '.nrg', '.mdf', '.bin'))
-            apple_mode = '.apple.' in ext
-            pure_mode = '.pure.' in ext
+            is_cdrom = iso_path.lower().endswith('.iso')
+            apple_mode = '.apple.' in iso_path.lower()
+            pure_mode = '.pure.' in iso_path.lower()
             
-            target_device_path = iso_path
-            
-            # Прогоняем сложные оптические форматы через CDEmu
-            if is_optical:
-                self.logger.info(f"Loading {os.path.basename(iso_path)} into CDEmu virtual drive...")
-                subprocess.run(["cdemu", "unload", "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                time.sleep(0.5)
-                
-                res = subprocess.run(["cdemu", "--bus", "system", "load", "0", iso_path], capture_output=True, text=True)
-                if res.returncode != 0:
-                    self.logger.error(f"CDEmu load failed: {res.stderr}")
-                    return False
-                    
-                target_device_path = "/dev/sr0"
-                time.sleep(1.0)
-            else:
-                self.logger.info("Bypassing CDEmu for RAW image (.img)")
-            # -------------------------------------
-            
-            needs_rebuild = (self._current_mode_is_cdrom != is_optical) or \
+            # УБРАЛИ ХАК network_first!
+            needs_rebuild = (self._current_mode_is_cdrom != is_cdrom) or \
                             (self._current_pure_mode != pure_mode) or \
                             (self._current_apple_mode != apple_mode)
                             
@@ -142,18 +122,14 @@ class GadgetManager:
             
             if needs_rebuild:
                 self.logger.info("Rebuilding gadget structure...")
-                if not self.builder.build(self.net_mgr, is_optical, pure_mode, apple_mode):
+                # Вызываем build без network_first
+                if not self.builder.build(self.net_mgr, is_cdrom, pure_mode, apple_mode):
                     return False
-                self._current_mode_is_cdrom = is_optical
+                self._current_mode_is_cdrom = is_cdrom
                 self._current_pure_mode = pure_mode
                 self._current_apple_mode = apple_mode
                 
-            self.builder.write_file(lun0_file, '\n')
-            time.sleep(0.5)
-            
-            # Вставляем готовое устройство
-            self.logger.info(f"Connecting {target_device_path} to USB LUN...")
-            self.builder.write_file(lun0_file, target_device_path)
+            self.builder.write_file(lun0_file, iso_path)
             
             if was_bound:
                 self.logger.info("Rebinding USB...")
@@ -172,8 +148,6 @@ class GadgetManager:
     def shutdown(self):
         self.unbind()
         self.builder.cleanup()
-        # Выгружаем образ из Линукса при выключении
-        subprocess.run(["cdemu", "unload", "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def get_status(self) -> Dict[str, Any]:
         return {'state': self.state.value, 'current_iso': self.current_iso, 'udc': self._udc, 'functions':['mass_storage']}
