@@ -1,8 +1,16 @@
-This is not a good way how to do it, we should rather emulate dvd for big isos, but it should work for data isos.
 diff --git a/drivers/usb/gadget/function/storage_common.c b/drivers/usb/gadget/function/storage_common.c
-index 75831f2c7..f92c84a3f 100644
+index 75831f2c7..d05033f63 100644
 --- a/drivers/usb/gadget/function/storage_common.c
 +++ b/drivers/usb/gadget/function/storage_common.c
+@@ -36,7 +36,7 @@ struct usb_interface_descriptor fsg_intf_desc = {
+ 
+ 	.bNumEndpoints =	2,		/* Adjusted during fsg_bind() */
+ 	.bInterfaceClass =	USB_CLASS_MASS_STORAGE,
+-	.bInterfaceSubClass =	USB_SC_SCSI,	/* Adjusted during fsg_bind() */
++	.bInterfaceSubClass =	0x02,	/* ATAPI / MMC-2 True CD-ROM Hack */
+ 	.bInterfaceProtocol =	USB_PR_BULK,	/* Adjusted during fsg_bind() */
+ 	.iInterface =		FSG_STRING_INTERFACE,
+ };
 @@ -244,12 +244,6 @@ int fsg_lun_open(struct fsg_lun *curlun, const char *filename)
  	min_sectors = 1;
  	if (curlun->cdrom) {

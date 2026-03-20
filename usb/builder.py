@@ -70,12 +70,22 @@ class GadgetBuilder:
             self.write_file(f'{gp}/bDeviceProtocol', '0x00')
             mfg, prod, stall = 'Apple Inc.', 'Apple USB SuperDrive', '0'
         elif pure_mode:
-            self.write_file(f'{gp}/idVendor', '0x1d6b')  
-            self.write_file(f'{gp}/idProduct', '0x0104') 
+            # === TRUE DVD EMULATION (Hitachi-LG Data Storage) ===
+            self.logger.info("Building TRUE HARDWARE DVD Spoof (Hitachi-LG)")
+            self.write_file(f'{gp}/idVendor', '0x0e8d')  # MediaTek Inc. (OEM чипа)
+            self.write_file(f'{gp}/idProduct', '0x1887') # Hitachi-LG
+            
+            # Устройство говорит "Смотри в интерфейсы"
             self.write_file(f'{gp}/bDeviceClass', '0x00')
             self.write_file(f'{gp}/bDeviceSubClass', '0x00')
             self.write_file(f'{gp}/bDeviceProtocol', '0x00')
-            mfg, prod, stall = 'Generic', 'USB Optical Drive', '0'
+            
+            mfg = 'Hitachi-LG Data Storage Inc'
+            prod = 'Portable Super Multi Drive'
+            stall = '0' 
+            
+            # Идеально точная строка INQUIRY (Vendor 8 char, Product 16 char)
+            inquiry = 'HL-DT-STDVD-RW          '
         else:
             # === СТАНДАРТНЫЙ РЕЖИМ (CD-ROM + NCM Network) ===
             self.write_file(f'{gp}/idVendor', '0x1d6b')
@@ -92,7 +102,10 @@ class GadgetBuilder:
         os.makedirs(f'{gp}/strings/0x409', exist_ok=True)
         self.write_file(f'{gp}/strings/0x409/manufacturer', mfg)
         self.write_file(f'{gp}/strings/0x409/product', prod)
-        self.write_file(f'{gp}/strings/0x409/serialnumber', net_mgr.serial)
+        if pure_mode:
+            self.write_file(f'{gp}/strings/0x409/serialnumber', 'K0GMBUE4220         ')
+        else:
+            self.write_file(f'{gp}/strings/0x409/serialnumber', net_mgr.serial)
 
         os.makedirs(cp, exist_ok=True)
         os.makedirs(f'{cp}/strings/0x409', exist_ok=True)
