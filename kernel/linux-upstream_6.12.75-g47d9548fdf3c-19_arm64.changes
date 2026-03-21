@@ -1,0 +1,33 @@
+Format: 1.8
+Date: Sat, 21 Mar 2026 15:11:31 +0400
+Source: linux-upstream
+Binary: linux-headers-6.12.75-v8-zerocd+ linux-image-6.12.75-v8-zerocd+ linux-libc-dev
+Architecture: arm64
+Version: 6.12.75-g47d9548fdf3c-19
+Distribution: trixie
+Urgency: low
+Maintainer: root <root@prox-box.lan>
+Changed-By: root <root@prox-box.lan>
+Description:
+ linux-headers-6.12.75-v8-zerocd+ - Linux kernel headers for 6.12.75-v8-zerocd+ on arm64
+ linux-image-6.12.75-v8-zerocd+ - Linux kernel, version 6.12.75-v8-zerocd+
+ linux-libc-dev - Linux support headers for userspace development
+Changes:
+ linux-upstream (6.12.75-g47d9548fdf3c-19) trixie; urgency=low
+ .
+   * Custom built Linux kernel.
+Checksums-Sha1:
+ 8a677e64646fbe61a7c32ff30083810198831a70 8566860 linux-headers-6.12.75-v8-zerocd+_6.12.75-g47d9548fdf3c-19_arm64.deb
+ 1ab2c91ba61b3018beca2410dcf57495dab02540 32688128 linux-image-6.12.75-v8-zerocd+_6.12.75-g47d9548fdf3c-19_arm64.deb
+ ad331e40c9ea757e7ed9874e2f48ea2aa41b6263 1375352 linux-libc-dev_6.12.75-g47d9548fdf3c-19_arm64.deb
+ 8ac269161027ba1947357ad6ad8f1ec0ed00c799 7153 linux-upstream_6.12.75-g47d9548fdf3c-19_arm64.buildinfo
+Checksums-Sha256:
+ 63b0bf72503b34c91d48df0e2e841af34c10631749a42f940a0a74790abe3d3a 8566860 linux-headers-6.12.75-v8-zerocd+_6.12.75-g47d9548fdf3c-19_arm64.deb
+ 08edfa4ee80087d6c02354c5b659ada6167ee8f193e1dc905b1a9191292d9467 32688128 linux-image-6.12.75-v8-zerocd+_6.12.75-g47d9548fdf3c-19_arm64.deb
+ c896a748322234209c55168d6952373066c237e121162a236750d4d142120f2a 1375352 linux-libc-dev_6.12.75-g47d9548fdf3c-19_arm64.deb
+ f815963dcf1b3d7a9d3a63a146c1ea2987ddf07830c7a7b0539ad746310d7a55 7153 linux-upstream_6.12.75-g47d9548fdf3c-19_arm64.buildinfo
+Files:
+ 9e8fdf008b8077d2587accb509dd7325 8566860 kernel optional linux-headers-6.12.75-v8-zerocd+_6.12.75-g47d9548fdf3c-19_arm64.deb
+ 02f35f779127a6917ca00788ec575f41 32688128 kernel optional linux-image-6.12.75-v8-zerocd+_6.12.75-g47d9548fdf3c-19_arm64.deb
+ c9d60b191757db6faf90030e7a73fd2f 1375352 devel optional linux-libc-dev_6.12.75-g47d9548fdf3c-19_arm64.deb
+ 78a478357a2c6e1881aeaf4f7af4559f 7153 kernel optional linux-upstream_6.12.75-g47d9548fdf3c-19_arm64.buildinfo
