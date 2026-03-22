@@ -44,14 +44,51 @@ else
     rm -rf "$INSTALL_DIR"
     git clone --recurse-submodules "$REPO_URL" "$INSTALL_DIR"
 fi
-
 cd "$INSTALL_DIR"
+
+# === УСТАНОВКА КАСТОМНОГО ЯДРА ZEROCD ===
+KERNEL_DIR="$INSTALL_DIR/kernel"
+if[ -d "$KERNEL_DIR" ]; then
+    DEB_COUNT=$(ls -1 "$KERNEL_DIR"/*.deb 2>/dev/null | wc -l)
+    if[ "$DEB_COUNT" -gt 0 ]; then
+        log_info "Found custom kernel packages. Installing via dpkg..."
+        dpkg -i "$KERNEL_DIR"/*.deb || true
+        
+        log_info "Fixing Raspberry Pi boot hooks (copying custom kernel to firmware)..."
+        LATEST_VMLINUZ=$(ls -t /boot/vmlinuz-*zerocd* 2>/dev/null | head -n 1)
+        LATEST_INITRD=$(ls -t /boot/initrd.img-*zerocd* 2>/dev/null | head -n 1)
+        
+        if [ -z "$LATEST_VMLINUZ" ]; then
+            log_warn "No 'zerocd' kernel found, trying latest standard kernel..."
+            LATEST_VMLINUZ=$(ls -t /boot/vmlinuz-* 2>/dev/null | head -n 1)
+            LATEST_INITRD=$(ls -t /boot/initrd.img-* 2>/dev/null | head -n 1)
+        fi
+        
+        if[ -n "$LATEST_VMLINUZ" ] && [ -n "$LATEST_INITRD" ]; then
+            log_info "Copying $LATEST_VMLINUZ -> /boot/firmware/kernel8.img"
+            cp "$LATEST_VMLINUZ" /boot/firmware/kernel8.img
+            
+            log_info "Copying $LATEST_INITRD -> /boot/firmware/initramfs8"
+            cp "$LATEST_INITRD" /boot/firmware/initramfs8
+            
+            CONFIG_FILE="/boot/firmware/config.txt"
+            [ -f /boot/config.txt ] && CONFIG_FILE="/boot/config.txt"
+            if ! grep -q "^initramfs initramfs8" "$CONFIG_FILE"; then
+                echo "initramfs initramfs8 followkernel" >> "$CONFIG_FILE"
+                log_info "Added initramfs to $CONFIG_FILE"
+            fi
+            log_info "Custom kernel successfully applied!"
+        else
+            log_error "Could not find newly installed kernel in /boot!"
+        fi
+    fi
+fi
+# ========================================
 
 log_info "Updating package lists..."
 apt-get update -qq
 
 log_info "Installing system dependencies..."
-# ИСПРАВЛЕНИЕ: Удален несуществующий fc-cache, добавлен fontconfig и build-essential
 apt-get install -y -qq \
     python3 python3-pip python3-venv python3-dev \
     python3-rpi.gpio python3-spidev python3-pil \
@@ -73,29 +110,39 @@ fi
 apt-get install -y -qq fonts-dejavu-core || true
 fc-cache -f > /dev/null 2>&1 || true
 
-# Raspberry Pi Hardware Configuration
-if [ "$IS_RPI" = true ]; then
+if[ "$IS_RPI" = true ]; then
     log_info "Configuring Boot Options..."
-    CONFIG_FILE="/boot/firmware/config.txt"[ -f /boot/config.txt ] && CONFIG_FILE="/boot/config.txt"
+    CONFIG_FILE="/boot/firmware/config.txt"
+    [ -f /boot/config.txt ] && CONFIG_FILE="/boot/config.txt"
     
-    # Enable SPI
-    if ! grep -q "^dtparam=spi=on" "$CONFIG_FILE"; then
-        echo "dtparam=spi=on" >> "$CONFIG_FILE"
-    fi
-    
-    # Enable DWC2 (КРИТИЧЕСКИ ВАЖНО ДЛЯ USB GADGET)
-    if ! grep -q "^dtoverlay=dwc2" "$CONFIG_FILE"; then
-        echo "dtoverlay=dwc2" >> "$CONFIG_FILE"
-    fi
+    if ! grep -q "^dtparam=spi=on" "$CONFIG_FILE"; then echo "dtparam=spi=on" >> "$CONFIG_FILE"; fi
+    if ! grep -q "^dtoverlay=dwc2" "$CONFIG_FILE"; then echo "dtoverlay=dwc2" >> "$CONFIG_FILE"; fi
+    if ! grep -q "^dtoverlay=disable-bt" "$CONFIG_FILE"; then echo "dtoverlay=disable-bt" >> "$CONFIG_FILE"; fi
 
-    # Автозагрузка модулей ядра
-    log_info "Enabling kernel modules..."
     if ! grep -q "^dwc2" /etc/modules; then echo "dwc2" >> /etc/modules; fi
     if ! grep -q "^libcomposite" /etc/modules; then echo "libcomposite" >> /etc/modules; fi
     
-    # Загружаем "на горячую", чтобы не перезагружаться прямо сейчас для сборки
     modprobe dwc2 2>/dev/null || true
     modprobe libcomposite 2>/dev/null || true
+
+    log_info "Optimizing systemd boot time..."
+    systemctl disable NetworkManager-wait-online.service 2>/dev/null || true
+    systemctl mask NetworkManager-wait-online.service 2>/dev/null || true
+    systemctl disable systemd-networkd-wait-online.service 2>/dev/null || true
+    systemctl mask systemd-networkd-wait-online.service 2>/dev/null || true
+    systemctl disable apt-daily.service 2>/dev/null || true
+    systemctl disable apt-daily.timer 2>/dev/null || true
+    systemctl disable apt-daily-upgrade.timer 2>/dev/null || true
+    systemctl disable apt-daily-upgrade.service 2>/dev/null || true
+    systemctl disable ModemManager.service 2>/dev/null || true
+    systemctl disable man-db.timer 2>/dev/null || true
+    systemctl disable hciuart.service 2>/dev/null || true
+    systemctl disable triggerhappy.service 2>/dev/null || true
+    
+    if systemctl is-active --quiet dphys-swapfile; then
+        systemctl stop dphys-swapfile || true
+        systemctl disable dphys-swapfile || true
+    fi
 fi
 
 log_info "Installing uMTP-Responder..."
@@ -112,7 +159,6 @@ if [ -f umtprd ]; then
 else
     log_warn "uMTP-Responder build failed"
 fi
-
 cd "$INSTALL_DIR"
 
 log_info "Setting permissions & creating directories..."
@@ -122,7 +168,6 @@ ln -sf "$INSTALL_DIR" /root/ZeroCD 2>/dev/null || true
 mkdir -p /root/zerocd
 mkdir -p /mnt/iso_storage
 
-# ИСПРАВЛЕНИЕ: Автоматически создаем сервис для сетевой установки
 log_info "Setting up systemd service..."
 cat > /etc/systemd/system/zerocd.service << 'EOF'
 [Unit]
@@ -133,6 +178,7 @@ After=local-fs.target network.target
 Type=simple
 User=root
 WorkingDirectory=/opt/zerocd
+Environment="PYTHONUNBUFFERED=1"
 ExecStart=/usr/bin/python3 /opt/zerocd/main.py
 Restart=on-failure
 RestartSec=5
@@ -148,14 +194,9 @@ echo ""
 echo "============================================"
 echo -e "${GREEN} ZeroCD Quick Install Complete!${NC}"
 echo "============================================"
-echo ""
-echo "Service is enabled. You can manage it with:"
-echo "  sudo systemctl start zerocd"
-echo "  sudo systemctl stop zerocd"
-echo ""
 
-if [ "$IS_RPI" = true ]; then
-    echo -e "${YELLOW}A reboot is REQUIRED to apply hardware changes (SPI/USB).${NC}"
+if[ "$IS_RPI" = true ]; then
+    echo -e "${YELLOW}A reboot is REQUIRED to apply Kernel and hardware changes.${NC}"
     read -p "Reboot now? [y/N]: " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then

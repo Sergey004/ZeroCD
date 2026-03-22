@@ -18,13 +18,11 @@ echo "  ZeroCD Installer - Raspberry Pi OS Lite"
 echo "============================================"
 echo ""
 
-# Check if running as root
 if[ "$EUID" -ne 0 ]; then
     log_error "Please run as root: sudo $0"
     exit 1
 fi
 
-# Detect Raspberry Pi via device tree
 log_info "Detecting hardware..."
 IS_RPI=false
 if[ -f /sys/firmware/devicetree/base/model ]; then
@@ -35,15 +33,58 @@ if[ -f /sys/firmware/devicetree/base/model ]; then
     fi
 fi
 
-if [ "$IS_RPI" = false ]; then
+if[ "$IS_RPI" = false ]; then
     log_warn "Not a Raspberry Pi - USB gadget features will not work natively"
 fi
 
-# Update package lists
+# === УСТАНОВКА КАСТОМНОГО ЯДРА ZEROCD ===
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+KERNEL_DIR="$SCRIPT_DIR/kernel"
+
+if [ -d "$KERNEL_DIR" ]; then
+    DEB_COUNT=$(ls -1 "$KERNEL_DIR"/*.deb 2>/dev/null | wc -l)
+    if[ "$DEB_COUNT" -gt 0 ]; then
+        log_info "Found $DEB_COUNT custom kernel package(s). Installing via dpkg..."
+        dpkg -i "$KERNEL_DIR"/*.deb || true
+        
+        log_info "Searching for custom ZeroCD kernel in /boot..."
+        
+        # ИСПРАВЛЕНИЕ: Ищем строго наше кастомное ядро по суффиксу "zerocd"
+        LATEST_VMLINUZ=$(ls -t /boot/vmlinuz-*zerocd* 2>/dev/null | head -n 1)
+        LATEST_INITRD=$(ls -t /boot/initrd.img-*zerocd* 2>/dev/null | head -n 1)
+        
+        # Запасной план (если ядро было собрано без подписи)
+        if [ -z "$LATEST_VMLINUZ" ]; then
+            log_warn "No kernel with 'zerocd' in name found, taking the newest one..."
+            LATEST_VMLINUZ=$(ls -t /boot/vmlinuz-* 2>/dev/null | head -n 1)
+            LATEST_INITRD=$(ls -t /boot/initrd.img-* 2>/dev/null | head -n 1)
+        fi
+        
+        if[ -n "$LATEST_VMLINUZ" ] && [ -n "$LATEST_INITRD" ]; then
+            log_info "Copying $LATEST_VMLINUZ -> /boot/firmware/kernel8.img"
+            cp "$LATEST_VMLINUZ" /boot/firmware/kernel8.img
+            
+            log_info "Copying $LATEST_INITRD -> /boot/firmware/initramfs8"
+            cp "$LATEST_INITRD" /boot/firmware/initramfs8
+            
+            CONFIG_FILE="/boot/firmware/config.txt"[ -f /boot/config.txt ] && CONFIG_FILE="/boot/config.txt"
+            if ! grep -q "^initramfs initramfs8" "$CONFIG_FILE"; then
+                echo "initramfs initramfs8 followkernel" >> "$CONFIG_FILE"
+                log_info "Added initramfs to $CONFIG_FILE"
+            fi
+            log_info "Custom kernel successfully applied!"
+        else
+            log_error "Could not find newly installed kernel in /boot!"
+        fi
+    else
+        log_warn "Directory 'kernel/' exists, but no .deb packages found inside."
+    fi
+fi
+# ========================================
+
 log_info "Updating package lists..."
 apt-get update -qq
 
-# Install system dependencies (Добавлены пакеты для сборки C++ и MTP)
 log_info "Installing system dependencies..."
 apt-get install -y -qq \
     python3 python3-pip python3-venv python3-dev \
@@ -52,60 +93,41 @@ apt-get install -y -qq \
     build-essential make gcc libusb-1.0-0-dev \
     || { log_error "Failed to install system packages"; exit 1; }
 
-# Install Python packages
 log_info "Installing Python packages..."
 pip3 install --break-system-packages -q \
     gpiod pillow keyboard numpy flask requests tqdm \
     || { log_error "Failed to install Python packages"; exit 1; }
 
-# Create ZeroCD user directory
 ZEROCD_DIR="/opt/zerocd"
-if[ ! -d "$ZEROCD_DIR" ]; then
+if [ ! -d "$ZEROCD_DIR" ]; then
     log_info "Creating ZeroCD directory..."
     mkdir -p "$ZEROCD_DIR"
 fi
 
-# Copy ZeroCD files
 log_info "Installing ZeroCD files..."
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cp -r "$SCRIPT_DIR"/* "$ZEROCD_DIR/" 2>/dev/null || true
 mkdir -p /mnt/iso_storage
 
-# Install Font Awesome
 log_info "Installing Font Awesome..."
 FONT_DIR="/usr/share/fonts/truetype/fontawesome"
 mkdir -p "$FONT_DIR"
-
-if [ ! -f "$FONT_DIR/fa-solid-900.ttf" ]; then
-    cd "$FONT_DIR"
-    wget -q --show-progress "https://use.fontawesome.com/releases/v6.5.1/webfonts/fa-solid-900.ttf" -O fa-solid-900.ttf
-    log_info "Font Awesome installed"
-else
-    log_info "Font Awesome already installed"
+if[ ! -f "$FONT_DIR/fa-solid-900.ttf" ]; then
+    wget -q --show-progress "https://use.fontawesome.com/releases/v6.5.1/webfonts/fa-solid-900.ttf" -O "$FONT_DIR/fa-solid-900.ttf"
 fi
 
-# Install DejaVu Sans font
-DEJAVU_DIR="/usr/share/fonts/truetype/dejavu"
-if[ ! -d "$DEJAVU_DIR" ]; then
-    log_info "Installing DejaVu Sans font..."
-    apt-get install -y -qq fonts-dejavu-core || true
-fi
-
-# Refresh font cache
-log_info "Refreshing font cache..."
+apt-get install -y -qq fonts-dejavu-core || true
 fc-cache -f > /dev/null 2>&1 || true
 
-# Install uMTP-Responder
 log_info "Installing uMTP-Responder..."
 mkdir -p /etc/umtprd
-if [ -f "$ZEROCD_DIR/conf/umtprd.conf" ]; then
+if[ -f "$ZEROCD_DIR/conf/umtprd.conf" ]; then
     cp "$ZEROCD_DIR/conf/umtprd.conf" /etc/umtprd/umtprd.conf
 fi
 
 cd "$ZEROCD_DIR/uMTP-Responder"
 if command -v make &> /dev/null; then
     make -j$(nproc)
-    if[ -f umtprd ]; then
+    if [ -f umtprd ]; then
         cp umtprd /usr/local/bin/
         log_info "uMTP-Responder installed"
     else
@@ -114,49 +136,49 @@ if command -v make &> /dev/null; then
 else
     log_warn "make not found, skipping uMTP-Responder build"
 fi
-
 cd "$ZEROCD_DIR"
 
-# Raspberry Pi Hardware Configuration
-if[ "$IS_RPI" = true ]; then
+if [ "$IS_RPI" = true ]; then
     log_info "Configuring Boot and Kernel Modules..."
     CONFIG_FILE="/boot/firmware/config.txt"
     [ -f /boot/config.txt ] && CONFIG_FILE="/boot/config.txt"
 
-    # 1. Enable SPI for Screen
-    if ! grep -q "^dtparam=spi=on" "$CONFIG_FILE"; then
-        echo "dtparam=spi=on" >> "$CONFIG_FILE"
-        log_info "SPI enabled in $CONFIG_FILE"
-    fi
+    if ! grep -q "^dtparam=spi=on" "$CONFIG_FILE"; then echo "dtparam=spi=on" >> "$CONFIG_FILE"; fi
+    if ! grep -q "^dtoverlay=dwc2" "$CONFIG_FILE"; then echo "dtoverlay=dwc2" >> "$CONFIG_FILE"; fi
+    if ! grep -q "^dtoverlay=disable-bt" "$CONFIG_FILE"; then echo "dtoverlay=disable-bt" >> "$CONFIG_FILE"; fi
 
-    # 2. Enable DWC2 for USB Gadget (КРИТИЧЕСКИ ВАЖНО)
-    if ! grep -q "^dtoverlay=dwc2" "$CONFIG_FILE"; then
-        echo "dtoverlay=dwc2" >> "$CONFIG_FILE"
-        log_info "USB Gadget Mode (dwc2) enabled in $CONFIG_FILE"
-    fi
-
-    # 3. Add modules to autostart
     if ! grep -q "^dwc2" /etc/modules; then echo "dwc2" >> /etc/modules; fi
     if ! grep -q "^libcomposite" /etc/modules; then echo "libcomposite" >> /etc/modules; fi
+    
+    # Оптимизация загрузки (systemd)
+    log_info "Optimizing systemd boot time..."
+    systemctl disable NetworkManager-wait-online.service 2>/dev/null || true
+    systemctl mask NetworkManager-wait-online.service 2>/dev/null || true
+    systemctl disable systemd-networkd-wait-online.service 2>/dev/null || true
+    systemctl mask systemd-networkd-wait-online.service 2>/dev/null || true
+    systemctl disable apt-daily.service 2>/dev/null || true
+    systemctl disable apt-daily.timer 2>/dev/null || true
+    systemctl disable apt-daily-upgrade.timer 2>/dev/null || true
+    systemctl disable apt-daily-upgrade.service 2>/dev/null || true
+    systemctl disable ModemManager.service 2>/dev/null || true
+    systemctl disable man-db.timer 2>/dev/null || true
+    systemctl disable hciuart.service 2>/dev/null || true
+    systemctl disable triggerhappy.service 2>/dev/null || true
+    
+    if systemctl is-active --quiet dphys-swapfile; then
+        systemctl stop dphys-swapfile || true
+        systemctl disable dphys-swapfile || true
+    fi
 fi
 
-# Create symlinks and set permissions
 log_info "Setting permissions..."
 ln -sf "$ZEROCD_DIR" /home/pi/ZeroCD 2>/dev/null || ln -sf "$ZEROCD_DIR" /root/ZeroCD 2>/dev/null || true
 chmod +x "$ZEROCD_DIR/main.py" 2>/dev/null || true
 chmod +x "$ZEROCD_DIR/scripts/"*.sh 2>/dev/null || true
 
-# Create systemd service
-CREATE_SERVICE=false
-read -p "Create systemd service for auto-start? [y/N]: " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    CREATE_SERVICE=true
-fi
-
-if[ "$CREATE_SERVICE" = true ]; then
-    log_info "Creating systemd service..."
-    cat > /etc/systemd/system/zerocd.service << 'EOF'
+# Systemd service
+log_info "Setting up systemd service..."
+cat > /etc/systemd/system/zerocd.service << 'EOF'
 [Unit]
 Description=ZeroCD USB Emulator
 After=local-fs.target network.target
@@ -165,6 +187,7 @@ After=local-fs.target network.target
 Type=simple
 User=root
 WorkingDirectory=/opt/zerocd
+Environment="PYTHONUNBUFFERED=1"
 ExecStart=/usr/bin/python3 /opt/zerocd/main.py
 Restart=on-failure
 RestartSec=5
@@ -173,19 +196,16 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
-    systemctl daemon-reload
-    systemctl enable zerocd.service
-    log_info "Systemd service created and enabled"
-fi
+systemctl daemon-reload
+systemctl enable zerocd.service
 
 echo ""
 echo "============================================"
 echo -e "${GREEN}  ZeroCD Installation Complete!${NC}"
 echo "============================================"
-echo ""
 
 if [ "$IS_RPI" = true ]; then
-    echo -e "${YELLOW}A reboot is REQUIRED to apply USB and SPI hardware changes.${NC}"
+    echo -e "${YELLOW}A reboot is REQUIRED to apply Kernel, USB, and SPI changes.${NC}"
     read -p "Reboot now? [y/N]: " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
