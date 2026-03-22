@@ -114,6 +114,7 @@ class GadgetManager:
                             
             was_bound = (self.state == GadgetState.ACTIVE)
             lun0_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.0/file'
+            lun1_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.1/file'
             
             if was_bound:
                 self.logger.info("Unbinding USB (Cold Swap)...")
@@ -122,14 +123,24 @@ class GadgetManager:
             
             if needs_rebuild:
                 self.logger.info("Rebuilding gadget structure...")
-                # Вызываем build без network_first
                 if not self.builder.build(self.net_mgr, is_cdrom, pure_mode, apple_mode):
                     return False
                 self._current_mode_is_cdrom = is_cdrom
                 self._current_pure_mode = pure_mode
                 self._current_apple_mode = apple_mode
                 
+            self.builder.write_file(lun0_file, '\n')
+            self.builder.write_file(lun1_file, '\n')
+            time.sleep(0.5)
+            
+            # 1. Вставляем основной образ ОС
             self.builder.write_file(lun0_file, iso_path)
+
+            # 2. Автоматически вставляем флешку с драйверами (если файл есть)
+            drivers_path = "/mnt/iso_storage/drivers.img"
+            if os.path.exists(drivers_path):
+                self.logger.info("Found drivers.img! Injecting into secondary USB slot...")
+                self.builder.write_file(lun1_file, drivers_path)
             
             if was_bound:
                 self.logger.info("Rebinding USB...")

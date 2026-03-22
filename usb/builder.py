@@ -41,8 +41,14 @@ class GadgetBuilder:
             for item in os.listdir(func_path):
                 fp = f"{func_path}/{item}"
                 try:
-                    if 'mass_storage' in item and 'lun.0' in os.listdir(fp):
-                        with open(f"{fp}/lun.0/file", 'w') as f: f.write('\n')
+                    if 'mass_storage' in item:
+                        # Очищаем первый LUN
+                        if 'lun.0' in os.listdir(fp):
+                            with open(f"{fp}/lun.0/file", 'w') as f: f.write('\n')
+                        # Очищаем и УДАЛЯЕМ второй LUN (ядро создает лун 0 само, а лун 1 мы создаем вручную)
+                        if 'lun.1' in os.listdir(fp):
+                            with open(f"{fp}/lun.1/file", 'w') as f: f.write('\n')
+                            os.rmdir(f"{fp}/lun.1")
                     os.rmdir(fp)
                 except: pass
 
@@ -118,6 +124,7 @@ class GadgetBuilder:
         time.sleep(0.1)
         self.write_file(f'{ms_path}/stall', stall)
         
+        # --- Слот 0: Для загрузочной ОС ---
         lun0 = f'{ms_path}/lun.0'
         os.makedirs(lun0, exist_ok=True)
         time.sleep(0.2)
@@ -127,6 +134,16 @@ class GadgetBuilder:
         self.write_file(f'{lun0}/nofua', '0' if is_cdrom else '1')
         inquiry = 'Apple   SuperDrive Drive' if apple_mode else ('ZeroCD  CD-ROM' if is_cdrom else 'ZeroCD  Flash Drive')
         self.write_file(f'{lun0}/inquiry_string', inquiry)
+
+        # --- Слот 1: Для драйверов (Всегда работает как флешка) ---
+        lun1 = f'{ms_path}/lun.1'
+        os.makedirs(lun1, exist_ok=True)
+        time.sleep(0.1)
+        self.write_file(f'{lun1}/removable', '1')  # Можно извлекать
+        self.write_file(f'{lun1}/ro', '0')         # Разрешаем запись (чтобы логи установки писались)
+        self.write_file(f'{lun1}/cdrom', '0')      # Это USB-флешка, не CD-ROM
+        self.write_file(f'{lun1}/nofua', '1')      # Быстрая запись
+        self.write_file(f'{lun1}/inquiry_string', 'ZeroCD  Drivers')
 
         # 2. ПОДГОТОВКА СЕТИ NCM
         ncm_path = None
