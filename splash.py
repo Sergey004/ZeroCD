@@ -9,7 +9,11 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 
 # Укажите точное имя файла вашей картинки!
-IMAGE_PATH = os.path.join(BASE_DIR, "splash.png") 
+IMAGE_PATH = os.path.join(BASE_DIR, "splash.png")
+
+# Угол поворота картинки (попробуйте: 0, 90, 180, 270)
+# Если картинка повёрнута неправильно, измените это значение
+IMAGE_ROTATION = int(os.environ.get("IMAGE_ROTATION", 0)) 
 
 try:
     from ui.display import Display
@@ -33,8 +37,9 @@ try:
                 # Конвертируем в RGB, как того требует драйвер ST7789
                 image = image.convert('RGB')
                 
-                # Поворачиваем на 270 градусов (совместимо с драйвером ST7789)
-                image = image.rotate(270, expand=False)
+                # Поворачиваем на нужный угол (по умолчанию 0°, менять если повёрнута)
+                if IMAGE_ROTATION != 0:
+                    image = image.rotate(IMAGE_ROTATION, expand=False)
                 
                 # Отправляем в буфер дисплея через объект Display
                 disp.image = image
