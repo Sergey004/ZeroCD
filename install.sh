@@ -37,48 +37,59 @@ if[ "$IS_RPI" = false ]; then
     log_warn "Not a Raspberry Pi - USB gadget features will not work natively"
 fi
 
-# === УСТАНОВКА КАСТОМНОГО ЯДРА ZEROCD ===
+# === УСТАНОВКА КАСТОМНОГО ЯДРА ZEROCD ИЗ DEB РЕПО ===
+log_info "Adding ZeroCD kernel repository..."
+
+# Добавляем GPG ключ репо
+wget -q -O - https://sergey004.github.io/ZeroCD-kernel-deb/zerocd-kernel.gpg.key | apt-key add - 2>/dev/null || gpg --dearmor -o /etc/apt/trusted.gpg.d/zerocd-kernel-archive-keyring.gpg < <(wget -q -O - https://sergey004.github.io/ZeroCD-kernel-deb/zerocd-kernel.gpg.key)
+
+# Добавляем репозиторий
+echo "deb https://sergey004.github.io/ZeroCD-kernel-deb main stable" > /etc/apt/sources.list.d/zerocd-kernel.list
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KERNEL_DIR="$SCRIPT_DIR/kernel"
 
+log_info "Updating package lists with new kernel repository..."
+apt-get update -qq 2>/dev/null || true
+
+log_info "Installing ZeroCD custom kernel from repository..."
+apt-get install -y -qq zerocd-kernel 2>/dev/null || log_warn "Could not install kernel from repository"
+
+# Запасной план: если репо не сработало, ищем локальные пакеты
 if [ -d "$KERNEL_DIR" ]; then
     DEB_COUNT=$(ls -1 "$KERNEL_DIR"/*.deb 2>/dev/null | wc -l)
-    if[ "$DEB_COUNT" -gt 0 ]; then
-        log_info "Found $DEB_COUNT custom kernel package(s). Installing via dpkg..."
+    if [ "$DEB_COUNT" -gt 0 ]; then
+        log_warn "Found local kernel packages as backup. Using those..."
         dpkg -i "$KERNEL_DIR"/*.deb || true
-        
-        log_info "Searching for custom ZeroCD kernel in /boot..."
-        
-        # ИСПРАВЛЕНИЕ: Ищем строго наше кастомное ядро по суффиксу "zerocd"
-        LATEST_VMLINUZ=$(ls -t /boot/vmlinuz-*zerocd* 2>/dev/null | head -n 1)
-        LATEST_INITRD=$(ls -t /boot/initrd.img-*zerocd* 2>/dev/null | head -n 1)
-        
-        # Запасной план (если ядро было собрано без подписи)
-        if [ -z "$LATEST_VMLINUZ" ]; then
-            log_warn "No kernel with 'zerocd' in name found, taking the newest one..."
-            LATEST_VMLINUZ=$(ls -t /boot/vmlinuz-* 2>/dev/null | head -n 1)
-            LATEST_INITRD=$(ls -t /boot/initrd.img-* 2>/dev/null | head -n 1)
-        fi
-        
-        if[ -n "$LATEST_VMLINUZ" ] && [ -n "$LATEST_INITRD" ]; then
-            log_info "Copying $LATEST_VMLINUZ -> /boot/firmware/kernel8.img"
-            cp "$LATEST_VMLINUZ" /boot/firmware/kernel8.img
-            
-            log_info "Copying $LATEST_INITRD -> /boot/firmware/initramfs8"
-            cp "$LATEST_INITRD" /boot/firmware/initramfs8
-            
-            CONFIG_FILE="/boot/firmware/config.txt"[ -f /boot/config.txt ] && CONFIG_FILE="/boot/config.txt"
-            if ! grep -q "^initramfs initramfs8" "$CONFIG_FILE"; then
-                echo "initramfs initramfs8 followkernel" >> "$CONFIG_FILE"
-                log_info "Added initramfs to $CONFIG_FILE"
-            fi
-            log_info "Custom kernel successfully applied!"
-        else
-            log_error "Could not find newly installed kernel in /boot!"
-        fi
-    else
-        log_warn "Directory 'kernel/' exists, but no .deb packages found inside."
     fi
+fi
+
+log_info "Fixing Raspberry Pi boot hooks (copying custom kernel to firmware)..."
+LATEST_VMLINUZ=$(ls -t /boot/vmlinuz-*zerocd* 2>/dev/null | head -n 1)
+LATEST_INITRD=$(ls -t /boot/initrd.img-*zerocd* 2>/dev/null | head -n 1)
+
+if [ -z "$LATEST_VMLINUZ" ]; then
+    log_warn "No 'zerocd' kernel found, trying latest standard kernel..."
+    LATEST_VMLINUZ=$(ls -t /boot/vmlinuz-* 2>/dev/null | head -n 1)
+    LATEST_INITRD=$(ls -t /boot/initrd.img-* 2>/dev/null | head -n 1)
+fi
+
+if [ -n "$LATEST_VMLINUZ" ] && [ -n "$LATEST_INITRD" ]; then
+    log_info "Copying $LATEST_VMLINUZ -> /boot/firmware/kernel8.img"
+    cp "$LATEST_VMLINUZ" /boot/firmware/kernel8.img
+    
+    log_info "Copying $LATEST_INITRD -> /boot/firmware/initramfs8"
+    cp "$LATEST_INITRD" /boot/firmware/initramfs8
+    
+    CONFIG_FILE="/boot/firmware/config.txt"
+    [ -f /boot/config.txt ] && CONFIG_FILE="/boot/config.txt"
+    if ! grep -q "^initramfs initramfs8" "$CONFIG_FILE"; then
+        echo "initramfs initramfs8 followkernel" >> "$CONFIG_FILE"
+        log_info "Added initramfs to $CONFIG_FILE"
+    fi
+    log_info "Custom kernel successfully applied!"
+else
+    log_warn "Could not find kernel in /boot!"
 fi
 # ========================================
 
@@ -176,8 +187,9 @@ ln -sf "$ZEROCD_DIR" /home/pi/ZeroCD 2>/dev/null || ln -sf "$ZEROCD_DIR" /root/Z
 chmod +x "$ZEROCD_DIR/main.py" 2>/dev/null || true
 chmod +x "$ZEROCD_DIR/scripts/"*.sh 2>/dev/null || true
 
-# Systemd service
-log_info "Setting up systemd service..."
+
+log_info "Setting up systemd services..."
+
 cat > /etc/systemd/system/zerocd.service << 'EOF'
 [Unit]
 Description=ZeroCD USB Emulator
@@ -196,8 +208,29 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
+log_info "Setting up Splash Screen service..."
+cat > /etc/systemd/system/zerocd-splash.service << 'EOF'
+[Unit]
+Description=ZeroCD Splash Screen
+After=local-fs.target
+Before=zerocd.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/zerocd
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/usr/bin/python3 /opt/zerocd/splash.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 systemctl daemon-reload
 systemctl enable zerocd.service
+systemctl enable zerocd-splash.service
 
 echo ""
 echo "============================================"

@@ -1,0 +1,16 @@
+[Unit]
+Description=ZeroCD Splash Screen
+After=local-fs.target
+Before=zerocd.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/zerocd
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/usr/bin/python3 /opt/zerocd/splash.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

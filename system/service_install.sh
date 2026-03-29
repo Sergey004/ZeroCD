@@ -15,19 +15,26 @@ SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 SCRIPT_DIR="/opt/zerocd"
 
 install() {
-    echo "Installing ZeroCD service..."
+    echo "Installing ZeroCD services..."
 
     mkdir -p "${SCRIPT_DIR}"
-    cp -r main.py ui input usb net system config.py "${SCRIPT_DIR}/"
+    cp -r main.py ui input usb net system config.py splash.py "${SCRIPT_DIR}/"
 
     mkdir -p /var/log
     touch /var/log/zerocd.log
     chmod 644 /var/log/zerocd.log
 
+    # Установка сервисов
+    cp system/zerocd.service /etc/systemd/system/
+    cp system/zerocd-splash.service /etc/systemd/system/
+
     systemctl daemon-reload
     systemctl enable "${SERVICE_NAME}"
+    systemctl enable "zerocd-splash"
 
-    echo "ZeroCD service installed. Use 'systemctl start zerocd' to run."
+    echo "ZeroCD services installed."
+    echo "Use 'systemctl start zerocd' to run the main service."
+    echo "Use 'systemctl start zerocd-splash' to show splash screen."
 }
 
 uninstall() {
