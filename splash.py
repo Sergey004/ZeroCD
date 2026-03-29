@@ -57,14 +57,22 @@ try:
         print("Press Ctrl+C to stop.")
         
         # === 3. ДЕРЖИМ ЭКРАН ВКЛЮЧЕННЫМ ===
-        while True:
-            time.sleep(1)
-            
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\nStopping splash screen...")
+            disp.close()
+            os._exit(0)
+    else:
+        print("Failed to initialize display")
+        os._exit(1)
+        
 except KeyboardInterrupt:
     print("\nStopping splash screen...")
-    # При выходе выключаем подсветку
     try:
-        disp.close()
+        if 'disp' in locals():
+            disp.close()
     except:
         pass
     os._exit(0)
