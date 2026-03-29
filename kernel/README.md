@@ -1,1 +1,1 @@
-# Based on [linux kernel from Raspberry Pi Foundation](https://github.com/raspberrypi/linux)
+# MOVED TO https://github.com/Sergey004/ZeroCD-kernel-deb
