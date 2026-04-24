@@ -302,8 +302,44 @@ class ST7789:
             display_item = item[:28]
             self._draw_text(10, y + 8, f"{prefix} {display_item}", text_color)
 
-            if is_active:
-                self._draw_text(200, y + 8, "*", ST7789_COLORS['YELLOW'])
+        if is_active:
+            self._draw_text(200, y + 8, "*", ST7789_COLORS['YELLOW'])
+
+        self._update()
+
+    def draw_create_img_menu(self, items: List[str], selected_index: int, scroll_offset: int = 0,
+                             free_space_mb: int = 0):
+        self.clear(ST7789_COLORS['BLACK'])
+
+        self.draw.rectangle((0, 0, 240, 24), fill=ST7789_COLORS['YELLOW'])
+        self._draw_text(5, 6, " Create IMG ", ST7789_COLORS['BLACK'])
+
+        if free_space_mb > 0:
+            free_str = f"Free: {free_space_mb}MB" if free_space_mb < 1024 else f"Free: {free_space_mb // 1024}GB"
+            self._draw_text(240 - len(free_str) * 10 - 5, 6, free_str, ST7789_COLORS['BLACK'])
+
+        self._draw_text(5, 28, "Select size:", ST7789_COLORS['CYAN'])
+
+        menu_y = 46
+        item_height = 28
+
+        for i, item in enumerate(visible_items := items):
+            global_index = scroll_offset + i
+            y = menu_y + i * item_height
+            is_selected = (global_index == selected_index)
+
+            if is_selected:
+                self.draw.rectangle((0, y, 240, y + item_height), fill=ST7789_COLORS['GREEN'])
+                prefix = ">"
+                text_color = ST7789_COLORS['BLACK']
+            else:
+                self.draw.rectangle((0, y, 240, y + item_height), fill=ST7789_COLORS['BLACK'])
+                prefix = " "
+                text_color = ST7789_COLORS['WHITE']
+
+            self._draw_text(10, y + 6, f"{prefix} {item}", text_color)
+
+        self._draw_text(5, 220, "PRESS=create LEFT=back", ST7789_COLORS['GRAY'])
 
         self._update()
 

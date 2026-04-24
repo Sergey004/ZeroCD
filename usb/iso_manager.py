@@ -73,3 +73,18 @@ class ISOManager:
     def refresh(self) -> List[str]:
         """Refresh image list (re-read directory)."""
         return self.list_isos()
+
+    def create_image(self, name: str, size_mb: int) -> Optional[str]:
+        from usb.image_creator import ImageCreator
+        creator = ImageCreator(str(self.directory))
+        return creator.create_blank_img(name, size_mb)
+
+    def get_available_space_mb(self) -> int:
+        from usb.image_creator import ImageCreator
+        creator = ImageCreator(str(self.directory))
+        return creator.get_available_space_mb()
+
+    def get_next_disk_name(self) -> str:
+        from usb.image_creator import ImageCreator
+        creator = ImageCreator(str(self.directory))
+        return creator.get_next_disk_name()

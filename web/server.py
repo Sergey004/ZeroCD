@@ -15,7 +15,8 @@ from config import (
     WEBUI_HOST,
     WEBUI_SECRET_KEY,
     POPULAR_ISOS,
-    ZEROCD_DATA_DIR
+    ZEROCD_DATA_DIR,
+    PRESET_IMG_SIZES
 )
 from usb.iso_manager import ISOManager
 from net.wifi import get_wifi_manager
@@ -242,6 +243,44 @@ def api_select():
 def api_disk():
     total, used, free = get_disk_usage()
     return jsonify({'total': total, 'used': used, 'free': free, 'percent': int(used/total*100) if total > 0 else 0})
+
+@app.route('/api/create-image', methods=['POST'])
+def api_create_image():
+    data = request.get_json()
+    name = data.get('name', '').strip()
+    size_mb = int(data.get('size_mb', 0))
+
+    if not name:
+        name = iso_manager.get_next_disk_name()
+
+    name = secure_filename(name)
+    if not name:
+        name = iso_manager.get_next_disk_name()
+
+    if size_mb < 1 or size_mb > 8192:
+        return jsonify({'error': 'Size must be 1-8192 MB'}), 400
+
+    available = iso_manager.get_available_space_mb()
+    if size_mb > available:
+        return jsonify({'error': f'Not enough space. Available: {available}MB'}), 400
+
+    result = iso_manager.create_image(name, size_mb)
+    if result:
+        filename = os.path.basename(result)
+        return jsonify({'success': True, 'filename': filename, 'path': result})
+    return jsonify({'error': 'Failed to create image'}), 500
+
+@app.route('/api/available-space')
+def api_available_space():
+    return jsonify({'available_mb': iso_manager.get_available_space_mb()})
+
+@app.route('/api/preset-sizes')
+def api_preset_sizes():
+    available = iso_manager.get_available_space_mb()
+    sizes = []
+    for s in PRESET_IMG_SIZES:
+        sizes.append({**s, 'available': s['mb'] <= available})
+    return jsonify(sizes)
 
 def format_size(bytes_size: int) -> str:
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:

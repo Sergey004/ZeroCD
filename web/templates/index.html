@@ -35,6 +35,24 @@
         .btn-secondary:hover { background: #1a2744; }
         .btn-danger { background: #ff6b6b22; color: #ff6b6b; border: 1px solid #ff6b6b44; }
         .btn-danger:hover { background: #ff6b6b33; }
+
+.modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 100; justify-content: center; align-items: center; }
+.modal-overlay.active { display: flex; }
+.modal { background: #16213e; border-radius: 12px; padding: 30px; border: 1px solid #0f3460; max-width: 500px; width: 90%; }
+.modal h2 { color: #00d9ff; margin-bottom: 20px; font-size: 1.3rem; }
+.modal-field { margin-bottom: 15px; }
+.modal-field label { display: block; color: #888; font-size: 0.85rem; margin-bottom: 5px; }
+.modal-field input { width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #0f3460; background: #1a1a2e; color: #eee; font-size: 1rem; box-sizing: border-box; }
+.size-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 8px; }
+.size-btn { padding: 10px 8px; border-radius: 6px; border: 1px solid #0f3460; background: #1a1a2e; color: #eee; cursor: pointer; text-align: center; font-size: 0.9rem; transition: all 0.2s; }
+.size-btn:hover { border-color: #00d9ff; background: #00d9ff11; }
+.size-btn.selected { border-color: #00d9ff; background: #00d9ff22; color: #00d9ff; }
+.size-btn.disabled { opacity: 0.3; cursor: not-allowed; pointer-events: none; }
+.modal-actions { display: flex; gap: 10px; margin-top: 20px; justify-content: flex-end; }
+.modal-info { color: #888; font-size: 0.85rem; margin-bottom: 15px; }
+.create-status { margin-top: 10px; padding: 10px; border-radius: 6px; display: none; }
+.create-status.success { display: block; background: #00ff8822; border: 1px solid #00ff8844; color: #00ff88; }
+.create-status.error { display: block; background: #ff6b6b22; border: 1px solid #ff6b6b44; color: #ff6b6b; }
         
         .iso-list { background: #16213e; border-radius: 12px; overflow: hidden; border: 1px solid #0f3460; }
         .iso-header { display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; border-bottom: 1px solid #0f3460; }
@@ -80,12 +98,12 @@
                     <span class="status-value">{{ wifi_ip }}</span>
                 </div>
                 {% endif %}
-                <div class="status-item">
-                    <span class="status-label">Storage:</span>
-                    <span class="status-value">{{ disk_percent }}%</span>
-                </div>
-            </div>
-        </header>
+      <div class="status-item">
+        <span class="status-label">Storage:</span>
+        <span class="status-value">{{ disk_percent }}%</span>
+      </div>
+      </div>
+</header>
         
         <nav>
             <a href="/" class="active">ISO</a>
@@ -104,10 +122,11 @@
             </div>
         </div>
         
-        <div class="actions">
-            <a href="/upload" class="btn btn-primary">+ Upload File</a>
-            <a href="/download" class="btn btn-secondary">Download from URL</a>
-        </div>
+  <div class="actions">
+    <a href="/upload" class="btn btn-primary">+ Upload File</a>
+    <a href="/download" class="btn btn-secondary">Download from URL</a>
+    <button class="btn btn-secondary" onclick="openCreateModal()">+ Create IMG</button>
+  </div>
         
         <div class="iso-list">
             <div class="iso-header">
@@ -136,10 +155,30 @@
                     <p style="margin-top: 10px;">Upload .iso or .img files to use</p>
                 </div>
             {% endif %}
-        </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="createModal">
+  <div class="modal">
+    <h2>Create IMG Disk Image</h2>
+    <div class="modal-info">Free space: <span id="freeSpace">--</span></div>
+    <div class="modal-field">
+      <label>Image name (without .img)</label>
+      <input type="text" id="imgName" placeholder="disk_001">
     </div>
-    
-    <script>
+    <div class="modal-field">
+      <label>Select size</label>
+      <div class="size-grid" id="sizeGrid"></div>
+    </div>
+    <div class="create-status" id="createStatus"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeCreateModal()">Cancel</button>
+      <button class="btn btn-primary" id="createBtn" onclick="createImage()" disabled>Create</button>
+    </div>
+  </div>
+</div>
+
+<script>
         function selectIso(name) {
             fetch('/api/select', {
                 method: 'POST',
@@ -162,6 +201,94 @@
         }
         
         setInterval(() => location.reload(), 30000);
+
+  let selectedSizeMB = 0;
+
+  function openCreateModal() {
+    const modal = document.getElementById('createModal');
+    modal.classList.add('active');
+    document.getElementById('imgName').value = '';
+    document.getElementById('createStatus').style.display = 'none';
+    document.getElementById('createStatus').className = 'create-status';
+    document.getElementById('createBtn').disabled = true;
+    selectedSizeMB = 0;
+    loadPresetSizes();
+  }
+
+  function closeCreateModal() {
+    document.getElementById('createModal').classList.remove('active');
+  }
+
+  function loadPresetSizes() {
+    fetch('/api/preset-sizes').then(r => r.json()).then(sizes => {
+      const grid = document.getElementById('sizeGrid');
+      grid.innerHTML = '';
+      sizes.forEach(s => {
+        const btn = document.createElement('button');
+        btn.className = 'size-btn' + (s.available ? '' : ' disabled');
+        btn.textContent = s.label;
+        btn.dataset.mb = s.mb;
+        if (s.available) {
+          btn.onclick = () => selectSize(s.mb, btn);
+        }
+        grid.appendChild(btn);
+      });
+    });
+    fetch('/api/available-space').then(r => r.json()).then(data => {
+      document.getElementById('freeSpace').textContent = formatSizeClient(data.available_mb * 1024 * 1024);
+    });
+  }
+
+  function selectSize(mb, btn) {
+    selectedSizeMB = mb;
+    document.querySelectorAll('.size-btn').forEach(b => b.classList.remove('selected'));
+    btn.classList.add('selected');
+    document.getElementById('createBtn').disabled = false;
+  }
+
+  function createImage() {
+    if (!selectedSizeMB) return;
+    const name = document.getElementById('imgName').value.trim() || '';
+    const statusEl = document.getElementById('createStatus');
+    const btn = document.getElementById('createBtn');
+    btn.disabled = true;
+    btn.textContent = 'Creating...';
+    statusEl.style.display = 'none';
+
+    fetch('/api/create-image', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name, size_mb: selectedSizeMB})
+    }).then(r => r.json()).then(data => {
+      if (data.success) {
+        statusEl.textContent = 'Created: ' + data.filename;
+        statusEl.className = 'create-status success';
+        setTimeout(() => { closeCreateModal(); location.reload(); }, 1500);
+      } else {
+        statusEl.textContent = data.error || 'Failed';
+        statusEl.className = 'create-status error';
+        btn.disabled = false;
+        btn.textContent = 'Create';
+      }
+    }).catch(err => {
+      statusEl.textContent = 'Connection error';
+      statusEl.className = 'create-status error';
+      btn.disabled = false;
+      btn.textContent = 'Create';
+    });
+  }
+
+  function formatSizeClient(bytes) {
+    for (let unit of ['B', 'KB', 'MB', 'GB']) {
+      if (bytes < 1024) return bytes.toFixed(1) + ' ' + unit;
+      bytes /= 1024;
+    }
+    return bytes.toFixed(1) + ' TB';
+  }
+
+  document.getElementById('createModal').addEventListener('click', function(e) {
+    if (e.target === this) closeCreateModal();
+  });
     </script>
 </body>
 </html>

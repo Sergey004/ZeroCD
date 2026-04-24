@@ -70,6 +70,16 @@ BACKLIGHT_TIMEOUT_SECONDS = 120
 BACKLIGHT_FADE_STEPS = 20
 BACKLIGHT_FADE_STEP_MS = 50
 
+PRESET_IMG_SIZES = [
+    {"label": "128 MB", "mb": 128},
+    {"label": "256 MB", "mb": 256},
+    {"label": "512 MB", "mb": 512},
+    {"label": "1 GB", "mb": 1024},
+    {"label": "2 GB", "mb": 2048},
+    {"label": "4 GB", "mb": 4096},
+    {"label": "8 GB", "mb": 8192},
+]
+
 # Popular ISO URLs for download
 POPULAR_ISOS = [
     {"name": "Ubuntu Desktop 22.04", "url": "https://releases.ubuntu.com/22.04/ubuntu-22.04.3-desktop-amd64.iso", "size": "4.2GB"},

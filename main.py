@@ -17,6 +17,7 @@ from input.joystick import Joystick, Direction
 from usb.iso_manager import ISOManager
 from net.wifi import WiFiManager
 from usb.gadget import GadgetManager
+from usb.image_creator import ImageCreator
 
 
 class ZeroCDApp:
@@ -37,6 +38,7 @@ class ZeroCDApp:
         self.running = False
         self.last_activity_time = None
         self.backlight_on = True
+        self.in_create_img = False
 
     def init(self) -> bool:
         self.logger.info("Initializing ZeroCD")
@@ -52,6 +54,9 @@ class ZeroCDApp:
             return False
 
         self.joystick = Joystick(disp=self.display, callback=self.on_joystick_event)
+
+        if hasattr(self.display, 'GPIO_KEY1_PIN') and self.display.GPIO_KEY1_PIN:
+            self.display.GPIO_KEY1_PIN.when_pressed = self.on_key1_event
 
         self.gadget = GadgetManager()
         if not self.gadget.init():
@@ -102,6 +107,12 @@ class ZeroCDApp:
             self.update_display()
 
     def on_joystick_event(self, direction: Direction):
+        if self.in_create_img:
+            self._handle_create_img_input(direction)
+            self.update_display()
+            self.reset_activity()
+            return
+
         if direction == Direction.UP:
             if self.menu:
                 self.menu.prev()
@@ -119,6 +130,41 @@ class ZeroCDApp:
 
         self.update_display()
         self.reset_activity()
+
+    def on_key1_event(self):
+        self.logger.info("Key1 pressed — entering Create IMG menu")
+        if self.menu:
+            self.menu.enter_create_img()
+            self.in_create_img = True
+            self.update_display()
+            self.reset_activity()
+
+    def _handle_create_img_input(self, direction: Direction):
+        if not self.menu:
+            return
+
+        if direction == Direction.UP:
+            self.menu.prev()
+        elif direction == Direction.DOWN:
+            self.menu.next()
+        elif direction == Direction.LEFT:
+            self.logger.info("Exiting Create IMG menu")
+            self.menu.exit_create_img()
+            self.in_create_img = False
+        elif direction == Direction.PRESS:
+            size_mb = self.menu.get_create_img_mb()
+            if size_mb > 0:
+                self.logger.info(f"Creating IMG: {size_mb}MB")
+                name = self.iso_manager.get_next_disk_name()
+                result = self.iso_manager.create_image(name, size_mb)
+                if result:
+                    self.logger.info(f"IMG created: {result}")
+                    self.iso_list = self.iso_manager.list_isos()
+                    self.menu = Menu(self.iso_list, self.on_iso_selected)
+                else:
+                    self.logger.error("Failed to create IMG")
+                self.menu.exit_create_img()
+                self.in_create_img = False
 
     def reset_activity(self):
         """Reset activity timer and turn on backlight if needed."""
@@ -265,7 +311,17 @@ class ZeroCDApp:
             self.logger.info("CD-ROM mode restored successfully")
 
     def update_display(self):
-        if self.display:
+        if not self.display:
+            return
+
+        if self.in_create_img and self.menu:
+            self.display.draw_create_img_menu(
+                items=self.menu.get_visible_items(),
+                selected_index=self.menu.get_index(),
+                scroll_offset=self.menu.get_scroll_offset(),
+                free_space_mb=self.iso_manager.get_available_space_mb()
+            )
+        else:
             self.display.draw_menu(
                 items=self.menu.get_visible_items() if self.menu else [],
                 selected_index=self.menu.get_index() if self.menu else 0,
@@ -275,8 +331,8 @@ class ZeroCDApp:
                 usb_bound=self.usb_connected,
                 mtp_on=self.mtp_enabled
             )
-            if hasattr(self.display, 'update'):
-                self.display.update()
+        if hasattr(self.display, 'update'):
+            self.display.update()
 
     def run(self):
         self.running = True
