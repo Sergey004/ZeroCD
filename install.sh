@@ -102,7 +102,19 @@ apt-get install -y -qq \
     python3-rpi.gpio python3-spidev python3-pil \
     git wget curl fontconfig hostapd dnsmasq iptables \
     build-essential make gcc libusb-1.0-0-dev \
+    dkms raspberrypi-kernel-headers \
     || { log_error "Failed to install system packages"; exit 1; }
+
+# === УСТАНОВКА f-dvd-storage DKMS ===
+log_info "Installing f-dvd-storage DKMS module..."
+DVD_DEB="$SCRIPT_DIR/kernel/f-dvd-storage-dkms_1.0.0-1_all.deb"
+if [ -f "$DVD_DEB" ]; then
+    dpkg -i "$DVD_DEB" || log_warn "f-dvd-storage-dkms install had warnings (check dkms status)"
+else
+    log_warn "f-dvd-storage-dkms .deb not found at $DVD_DEB"
+    log_warn "DVD-ROM emulation will be unavailable until you build and install it."
+    log_warn "See: https://github.com/Sergey004/ZeroCD-kernel-deb"
+fi
 
 log_info "Installing Python packages..."
 pip3 install --break-system-packages -q \
@@ -160,6 +172,9 @@ if [ "$IS_RPI" = true ]; then
 
     if ! grep -q "^dwc2" /etc/modules; then echo "dwc2" >> /etc/modules; fi
     if ! grep -q "^libcomposite" /etc/modules; then echo "libcomposite" >> /etc/modules; fi
+
+    # f_dvd_storage загружается через modprobe при необходимости,
+    # modules-load.d настраивает DKMS postinst
     
     # Оптимизация загрузки (systemd)
     log_info "Optimizing systemd boot time..."

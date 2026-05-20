@@ -57,7 +57,7 @@ class GadgetBuilder:
         try: os.rmdir(gadget_path)
         except: pass
 
-    def build(self, net_mgr, is_cdrom=True, pure_mode=False, apple_mode=False):
+    def build(self, net_mgr, is_cdrom=True, pure_mode=False, apple_mode=False, dvd_mode=False):
         self.cleanup()
         time.sleep(0.5)
         
@@ -119,7 +119,10 @@ class GadgetBuilder:
         self.write_file(f'{cp}/MaxPower', '250')
 
         # 1. ПОДГОТОВКА STORAGE (ОН ВСЕГДА ПЕРВЫЙ!)
-        ms_path = f'{gp}/functions/mass_storage.usb0'
+        # dvd_mode использует f_dvd_storage (наш кастомный модуль),
+        # который регистрируется в configfs как "dvd_storage"
+        func_type = 'dvd_storage' if dvd_mode else 'mass_storage'
+        ms_path = f'{gp}/functions/{func_type}.usb0'
         os.makedirs(ms_path, exist_ok=True)
         time.sleep(0.1)
         self.write_file(f'{ms_path}/stall', stall)
@@ -132,7 +135,14 @@ class GadgetBuilder:
         self.write_file(f'{lun0}/ro', '1' if is_cdrom else '0')
         self.write_file(f'{lun0}/cdrom', '1' if is_cdrom else '0')
         self.write_file(f'{lun0}/nofua', '0' if is_cdrom else '1')
-        inquiry = 'Apple   SuperDrive Drive' if apple_mode else ('ZeroCD  CD-ROM' if is_cdrom else 'ZeroCD  Flash Drive')
+        if apple_mode:
+            inquiry = 'Apple   SuperDrive Drive'
+        elif dvd_mode:
+            inquiry = 'HL-DT-ST DVD-ROM     '
+        elif is_cdrom:
+            inquiry = 'ZeroCD  CD-ROM      '
+        else:
+            inquiry = 'ZeroCD  Flash Drive '
         self.write_file(f'{lun0}/inquiry_string', inquiry)
 
         # --- Слот 1: Для драйверов (Всегда работает как флешка) ---
@@ -147,15 +157,15 @@ class GadgetBuilder:
 
         # 2. ПОДГОТОВКА СЕТИ NCM
         ncm_path = None
-        if not pure_mode and not apple_mode:
+        if not pure_mode and not apple_mode and not dvd_mode:
             ncm_path = f'{gp}/functions/ncm.usb0'
             os.makedirs(ncm_path, exist_ok=True)
             self.write_file(f'{ncm_path}/host_addr', net_mgr.host_mac)
             self.write_file(f'{ncm_path}/dev_addr', net_mgr.dev_mac)
 
         # === ИДЕАЛЬНЫЙ ПОРЯДОК ИНТЕРФЕЙСОВ ===
-        # BIOS рад (дисковод первый). Windows рада (ей плевать, где находится NCM). 
-        os.symlink(ms_path, f'{cp}/mass_storage.usb0')
+        # BIOS рад (дисковод первый). Windows рада (ей плевать, где находится NCM).
+        os.symlink(ms_path, f'{cp}/{func_type}.usb0')
         
         if ncm_path:
             self.logger.info("Linking NCM Network adapter...")

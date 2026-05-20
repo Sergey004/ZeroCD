@@ -37,6 +37,10 @@ ISO_DIR = "/mnt/iso_storage"
 GADGET_DIR = "/sys/kernel/config/usb_gadget/zerocd"
 GADGET_UDC = None
 
+# DVD gadget: images larger than this sector count (~900 MB) use f_dvd_storage
+# 450000 sectors × 2048 bytes = 921,600,000 bytes ≈ 900 MB
+DVD_SECTOR_THRESHOLD = 450000
+
 # Network interfaces
 WIFI_INTERFACE = "wlan0"
 USB_ETHERNET_INTERFACE = "usb0"

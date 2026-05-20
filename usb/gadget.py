@@ -1,5 +1,5 @@
 """
-USB Gadget manager for CD-ROM, Ethernet and MTP emulation
+USB Gadget manager for CD-ROM, DVD-ROM, Ethernet and MTP emulation
 """
 import os
 import subprocess
@@ -9,6 +9,7 @@ from enum import Enum
 from typing import Optional, Dict, Any
 from system.logger import get_logger
 
+from config import DVD_SECTOR_THRESHOLD
 from usb.network import USBNetworkManager
 from usb.builder import GadgetBuilder
 
@@ -23,7 +24,7 @@ class GadgetManager:
         self.state = GadgetState.UNBOUND
         self.current_iso: Optional[str] = None
         self.gadget_name = "zerocd"
-        self.function_name = "mass_storage.usb0"
+        self.function_name = "mass_storage.usb0"  # обновляется динамически при build()
         self._udc = None
         self._gadget_lock = threading.Lock()
         
@@ -33,11 +34,38 @@ class GadgetManager:
         self._current_mode_is_cdrom = True
         self._current_pure_mode = False
         self._current_apple_mode = False
+        self._current_dvd_mode = False  # новый флаг DVD
 
     def _check_and_load(self, mod):
         if mod not in subprocess.run(['lsmod'], capture_output=True, text=True).stdout:
             subprocess.run(['modprobe', mod], check=True)
             time.sleep(0.5)
+
+    def _is_dvd_image(self, iso_path: str) -> bool:
+        """Return True if the image is large enough to need f_dvd_storage.
+        Uses file size: >900 MB (DVD_SECTOR_THRESHOLD × 2048) or .dvd. in filename.
+        """
+        if '.dvd.' in iso_path.lower():
+            return True
+        try:
+            size_bytes = os.path.getsize(iso_path)
+            return (size_bytes // 2048) > DVD_SECTOR_THRESHOLD
+        except OSError:
+            return False
+
+    def _ensure_dvd_module(self) -> bool:
+        """Load f_dvd_storage module if not already loaded."""
+        lsmod = subprocess.run(['lsmod'], capture_output=True, text=True).stdout
+        if 'f_dvd_storage' in lsmod:
+            return True
+        try:
+            subprocess.run(['modprobe', 'f_dvd_storage'], check=True)
+            time.sleep(0.5)
+            self.logger.info("f_dvd_storage module loaded")
+            return True
+        except subprocess.CalledProcessError:
+            self.logger.warning("f_dvd_storage not available, falling back to f_mass_storage")
+            return False
 
     def _get_udc(self) -> Optional[str]:
         try:
@@ -51,6 +79,8 @@ class GadgetManager:
         try:
             self._check_and_load("dwc2")
             self._check_and_load("libcomposite")
+            # Пытаемся загрузить наш DVD модуль если есть, но не критично
+            self._ensure_dvd_module()
             if not os.path.ismount("/sys/kernel/config"):
                 subprocess.run(['mount', '-t', 'configfs', 'none', '/sys/kernel/config'], check=True)
         except Exception as e:
@@ -60,7 +90,7 @@ class GadgetManager:
         self._udc = self._get_udc()
         if not self._udc: return False
         
-        if not self.builder.build(self.net_mgr, is_cdrom=True, pure_mode=False, apple_mode=False): 
+        if not self.builder.build(self.net_mgr, is_cdrom=True, pure_mode=False, apple_mode=False, dvd_mode=False): 
             return False
             
         self.state = GadgetState.CONFIGURED
@@ -103,18 +133,36 @@ class GadgetManager:
             if getattr(self, 'current_iso', None) == iso_path:
                 return True
                 
-            is_cdrom = iso_path.lower().endswith('.iso')
-            apple_mode = '.apple.' in iso_path.lower()
-            pure_mode = '.pure.' in iso_path.lower()
-            
-            # УБРАЛИ ХАК network_first!
-            needs_rebuild = (self._current_mode_is_cdrom != is_cdrom) or \
-                            (self._current_pure_mode != pure_mode) or \
-                            (self._current_apple_mode != apple_mode)
-                            
+            is_cdrom    = iso_path.lower().endswith('.iso')
+            apple_mode  = '.apple.' in iso_path.lower()
+            pure_mode   = '.pure.'  in iso_path.lower()
+            dvd_mode    = is_cdrom and not apple_mode and self._is_dvd_image(iso_path)
+
+            # Если нужен DVD режим — убедимся что модуль есть
+            if dvd_mode and not self._ensure_dvd_module():
+                self.logger.warning("DVD module unavailable, treating as plain CD-ROM")
+                dvd_mode = False
+
+            needs_rebuild = (
+                self._current_mode_is_cdrom != is_cdrom or
+                self._current_pure_mode     != pure_mode or
+                self._current_apple_mode    != apple_mode or
+                self._current_dvd_mode      != dvd_mode
+            )
+
+            # Имена LUN-файлов зависят от типа функции
+            func_type = 'dvd_storage' if dvd_mode else 'mass_storage'
+            func_path = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{func_type}.usb0'
+            lun0_file = f'{func_path}/lun.0/file'
+            lun1_file = f'{func_path}/lun.1/file'
+
+            self.logger.info(
+                f"set_iso: dvd={dvd_mode} cd={is_cdrom} pure={pure_mode} "
+                f"apple={apple_mode} rebuild={needs_rebuild} "
+                f"size={os.path.getsize(iso_path)//1024//1024}MB"
+            )
+
             was_bound = (self.state == GadgetState.ACTIVE)
-            lun0_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.0/file'
-            lun1_file = f'/sys/kernel/config/usb_gadget/{self.gadget_name}/functions/{self.function_name}/lun.1/file'
             
             if was_bound:
                 self.logger.info("Unbinding USB (Cold Swap)...")
@@ -123,11 +171,15 @@ class GadgetManager:
             
             if needs_rebuild:
                 self.logger.info("Rebuilding gadget structure...")
-                if not self.builder.build(self.net_mgr, is_cdrom, pure_mode, apple_mode):
+                if not self.builder.build(
+                    self.net_mgr, is_cdrom, pure_mode, apple_mode, dvd_mode
+                ):
                     return False
                 self._current_mode_is_cdrom = is_cdrom
-                self._current_pure_mode = pure_mode
-                self._current_apple_mode = apple_mode
+                self._current_pure_mode     = pure_mode
+                self._current_apple_mode    = apple_mode
+                self._current_dvd_mode      = dvd_mode
+                self.function_name = f'{func_type}.usb0'
                 
             self.builder.write_file(lun0_file, '\n')
             self.builder.write_file(lun1_file, '\n')
@@ -161,4 +213,11 @@ class GadgetManager:
         self.builder.cleanup()
 
     def get_status(self) -> Dict[str, Any]:
-        return {'state': self.state.value, 'current_iso': self.current_iso, 'udc': self._udc, 'functions':['mass_storage']}
+        func = 'dvd_storage' if self._current_dvd_mode else 'mass_storage'
+        return {
+            'state': self.state.value,
+            'current_iso': self.current_iso,
+            'udc': self._udc,
+            'dvd_mode': self._current_dvd_mode,
+            'functions': [func]
+        }
